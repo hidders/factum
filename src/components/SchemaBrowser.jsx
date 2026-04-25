@@ -55,9 +55,12 @@ export default function SchemaBrowser() {
 
   const diagrams = store.diagrams ?? []
 
-  const [collapsed, setCollapsed] = useState(false)
-  const [pos,  setPos]  = useState(null)           // { x, y } | null → default
+  const [collapsed,   setCollapsed]   = useState(false)
+  const [expandFrom,  setExpandFrom]  = useState(null)  // { x, y } pill coords held during expand start
+  const [animating,   setAnimating]   = useState(false) // true while expand/collapse transition runs
+  const [pos,  setPos]  = useState(null)                // { x, y } | null → default
   const [size, setSize] = useState({ w: INIT_W, h: INIT_H })
+  const animTimerRef = useRef(null)
 
   const dragRef   = useRef(null)
   const resizeRef = useRef(null)
@@ -125,6 +128,30 @@ export default function SchemaBrowser() {
     window.addEventListener('mouseup',   onUp)
   }, [size])
 
+  // Collapse: mark animating so position transition is included
+  const handleCollapse = useCallback(() => {
+    setCollapsed(true)
+    setAnimating(true)
+    if (animTimerRef.current) clearTimeout(animTimerRef.current)
+    animTimerRef.current = setTimeout(() => setAnimating(false), 350)
+  }, [])
+
+  // Expand: pin position at pill for one paint, then release so CSS transition
+  // animates it to the expanded position. Keep animating=true until done.
+  const handleExpand = useCallback(() => {
+    const pw = 128
+    const px = window.innerWidth  - 258 - 114 - 6 - pw
+    const py = window.innerHeight - 26  - 8  - HDR_H
+    setExpandFrom({ x: px, y: py })
+    setCollapsed(false)
+    setAnimating(true)
+    if (animTimerRef.current) clearTimeout(animTimerRef.current)
+    animTimerRef.current = setTimeout(() => setAnimating(false), 350)
+    // After two frames the browser has painted at pill position; releasing
+    // expandFrom lets displayLeft/Top jump to posX/posY, which CSS then animates.
+    requestAnimationFrame(() => requestAnimationFrame(() => setExpandFrom(null)))
+  }, [])
+
   // Only relevant when multiple diagrams exist
   if (diagrams.length <= 1) return null
 
@@ -186,15 +213,15 @@ export default function SchemaBrowser() {
   // Fixed pill anchor: just above the status bar, to the left of the minimap pill
   const pillLeft = window.innerWidth  - 258 - 114 - 6 - PILL_W
   const pillTop  = window.innerHeight - 26 - 8 - HDR_H
-  const displayLeft = collapsed ? pillLeft : posX
-  const displayTop  = collapsed ? pillTop  : posY
+  const displayLeft = expandFrom?.x ?? (collapsed ? pillLeft : posX)
+  const displayTop  = expandFrom?.y ?? (collapsed ? pillTop  : posY)
 
   return (
     <>
       {/* ── Single morphing panel ── */}
       <div
         ref={panelRef}
-        onClick={collapsed ? () => setCollapsed(false) : undefined}
+        onClick={collapsed ? handleExpand : undefined}
         style={{
           position: 'fixed',
           left: displayLeft, top: displayTop,
@@ -209,7 +236,7 @@ export default function SchemaBrowser() {
           WebkitAppRegion: 'no-drag',
           fontFamily: FONT,
           cursor: collapsed ? 'pointer' : 'default',
-          transition: collapsed
+          transition: animating
             ? 'width 0.28s ease, height 0.28s ease, border-radius 0.28s ease, left 0.28s ease, top 0.28s ease'
             : 'width 0.28s ease, height 0.28s ease, border-radius 0.28s ease',
         }}
@@ -267,7 +294,7 @@ export default function SchemaBrowser() {
             </span>
             <button
               onMouseDown={e => e.stopPropagation()}
-              onClick={() => setCollapsed(true)}
+              onClick={handleCollapse}
               title="Collapse schema browser"
               style={{
                 background: 'none', border: 'none', cursor: 'pointer',

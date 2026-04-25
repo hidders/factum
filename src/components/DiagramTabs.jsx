@@ -221,7 +221,14 @@ export default function DiagramTabs() {
 
       {/* Add new diagram */}
       <div
-        onClick={() => store.addDiagram(`Diagram ${diagrams.length + 1}`)}
+        onClick={() => {
+          const used = new Set(
+            diagrams.map(d => d.name.match(/^Diagram (\d+)$/)?.[1]).filter(Boolean).map(Number)
+          )
+          let n = 1
+          while (used.has(n)) n++
+          store.addDiagram(`Diagram ${n}`)
+        }}
         title="Add diagram"
         style={{
           display: 'flex', alignItems: 'center',

@@ -7,13 +7,16 @@ import { factBounds, nestedFactBounds, ROLE_W, ROLE_H, ROLE_GAP } from './FactTy
 const MM_W  = 170
 const MM_H  = 110
 const PAD   = 30
-const HDR_H = 20   // header bar height
+const HDR_H = 24   // header bar height
 
 export default function Minimap() {
   const store = useOrmStore()
   const { objectTypes: visOts, facts: visFacts, constraints: visCons, subtypes: visSubs } = useDiagramElements()
 
-  const [collapsed, setCollapsed] = useState(false)
+  const [collapsed,  setCollapsed]  = useState(false)
+  const [expandFrom, setExpandFrom] = useState(null)  // { x, y } pill coords held during expand start
+  const [animating,  setAnimating]  = useState(false) // true while expand/collapse transition runs
+  const animTimerRef = useRef(null)
 
   // ── drag-to-move state ────────────────────────────────────────────────────
   const dragRef  = useRef(null)
@@ -32,7 +35,9 @@ export default function Minimap() {
   }, [])
 
   const defaultX = window.innerWidth - MM_W - 250   // leave room for inspector (240px) + gap
-  const defaultY = window.innerHeight - MM_H - HDR_H - 36  // above status bar (~26px) + gap
+  // Sit above the pill row (status bar 26px + gap 8px + pill HDR_H) with an 8px gap
+  const pillRowTop = window.innerHeight - 26 - 8 - HDR_H
+  const defaultY = pillRowTop - MM_H - HDR_H - 8
 
   const posX = store.minimapPos.x ?? defaultX
   const posY = store.minimapPos.y ?? defaultY
@@ -65,6 +70,25 @@ export default function Minimap() {
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
   }, [posX, posY, store])
+
+  const handleCollapse = useCallback(() => {
+    setCollapsed(true)
+    setAnimating(true)
+    if (animTimerRef.current) clearTimeout(animTimerRef.current)
+    animTimerRef.current = setTimeout(() => setAnimating(false), 350)
+  }, [])
+
+  const handleExpand = useCallback(() => {
+    const pw = 114
+    const px = window.innerWidth  - 258 - pw
+    const py = window.innerHeight - 26  - 8 - HDR_H
+    setExpandFrom({ x: px, y: py })
+    setCollapsed(false)
+    setAnimating(true)
+    if (animTimerRef.current) clearTimeout(animTimerRef.current)
+    animTimerRef.current = setTimeout(() => setAnimating(false), 350)
+    requestAnimationFrame(() => requestAnimationFrame(() => setExpandFrom(null)))
+  }, [])
 
   // ── diagram bounds ────────────────────────────────────────────────────────
   const bounds = useMemo(() => {
@@ -127,15 +151,15 @@ export default function Minimap() {
   // Fixed pill anchor: just above the status bar (26px), to the left of the inspector
   const pillLeft = window.innerWidth  - 258 - PILL_W
   const pillTop  = window.innerHeight - 26 - 8 - HDR_H
-  const displayLeft = collapsed ? pillLeft : posX
-  const displayTop  = collapsed ? pillTop  : posY
+  const displayLeft = expandFrom?.x ?? (collapsed ? pillLeft : posX)
+  const displayTop  = expandFrom?.y ?? (collapsed ? pillTop  : posY)
 
   return (
     <>
       {/* ── Single morphing panel ── */}
       <div
         ref={panelRef}
-        onClick={collapsed ? () => setCollapsed(false) : undefined}
+        onClick={collapsed ? handleExpand : undefined}
         style={{
           position: 'fixed',
           left: displayLeft, top: displayTop,
@@ -149,7 +173,7 @@ export default function Minimap() {
           zIndex: 10,
           WebkitAppRegion: 'no-drag',
           cursor: collapsed ? 'pointer' : 'default',
-          transition: collapsed
+          transition: animating
             ? 'width 0.28s ease, height 0.28s ease, border-radius 0.28s ease, left 0.28s ease, top 0.28s ease'
             : 'width 0.28s ease, height 0.28s ease, border-radius 0.28s ease',
         }}
@@ -200,7 +224,7 @@ export default function Minimap() {
         </span>
         <button
           onMouseDown={e => e.stopPropagation()}
-          onClick={() => setCollapsed(true)}
+          onClick={handleCollapse}
           title="Collapse minimap"
           style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px',
             fontSize: 11, lineHeight: 1, color: 'var(--ink-muted)', pointerEvents: 'all' }}

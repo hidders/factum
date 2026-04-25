@@ -1519,10 +1519,10 @@ export default function Inspector() {
                 style={{ accentColor: 'var(--accent)' }}/>
               <div>
                 <div style={{ fontSize: 12, color: 'var(--ink-2)', fontWeight: 500 }}>
-                  Show membership of sequences
+                  Show membership of role sequences
                 </div>
                 <div style={{ fontSize: 10, color: 'var(--ink-muted)', marginTop: 1 }}>
-                  Labels on roles and subtype edges when a constraint is selected
+                  Indicate the position of roles in the role sequences of the selected constraint
                 </div>
               </div>
             </label>

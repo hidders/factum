@@ -2,7 +2,7 @@ import React, { useRef, useCallback, useState, useEffect } from 'react'
 import { useOrmStore } from '../store/ormStore'
 import { useDiagramElements } from '../hooks/useDiagramElements'
 import ObjectTypeNode from './ObjectTypeNode'
-import FactTypeNode from './FactTypeNode'
+import FactTypeNode, { factBounds } from './FactTypeNode'
 import SubtypeArrows from './SubtypeArrows'
 import ConstraintNodes from './ConstraintNodes'
 import RoleConnectors, { MandatoryDots } from './RoleConnectors'
@@ -16,7 +16,7 @@ function snap(v) { return Math.round(v / SNAP) * SNAP }
 
 export default function Canvas() {
   const store = useOrmStore()
-  const { objectTypes: visibleOts, facts: visibleFacts, constraints: visibleConstraints } = useDiagramElements()
+  const { objectTypes: visibleOts, facts: visibleFacts, constraints: visibleConstraints, subtypes: visibleSubtypes } = useDiagramElements()
   const sharedIds = store.getSharedIds?.() ?? new Set()
   const svgRef = useRef(null)
   const [dragState, setDragState]     = useState(null)
@@ -28,6 +28,10 @@ export default function Canvas() {
   const [contextMenu, setContextMenu] = useState(null)  // { x, y, items } | null
 
   const closeContextMenu = useCallback(() => setContextMenu(null), [])
+
+  // True when an element appears in more than one diagram (show-all counts as containing every element)
+  const isInMultipleDiagrams = (id) =>
+    (store.diagrams ?? []).filter(d => d.elementIds === null || d.elementIds.includes(id)).length > 1
 
   const handleMultiSelectionContextMenu = useCallback((e) => {
     e.preventDefault()
@@ -56,8 +60,8 @@ export default function Canvas() {
       items: [
         { label: ot.kind === 'entity' ? 'Change to Value Type' : 'Change to Entity Type',
           action: () => store.updateObjectType(ot.id, { kind: ot.kind === 'entity' ? 'value' : 'entity' }) },
-        ...(store.diagrams?.length > 1 ? ['---',
-          { label: 'Remove from This Diagram',
+        ...(isInMultipleDiagrams(ot.id) ? ['---',
+          { label: 'Remove from Diagram',
             action: () => store.removeElementFromDiagram(ot.id, store.activeDiagramId) },
         ] : []),
         '---',
@@ -164,8 +168,8 @@ export default function Canvas() {
             ] : []),
           ],
         },
-        ...(store.diagrams?.length > 1 ? ['---',
-          { label: 'Remove from This Diagram',
+        ...(isInMultipleDiagrams(fact.id) ? ['---',
+          { label: 'Remove from Diagram',
             action: () => store.removeElementFromDiagram(fact.id, store.activeDiagramId) },
         ] : []),
         '---',
@@ -241,11 +245,6 @@ export default function Canvas() {
         })) })
         items.push('---')
       }
-    }
-    if (store.diagrams?.length > 1) {
-      items.push('---')
-      items.push({ label: 'Remove from This Diagram',
-        action: () => store.removeElementFromDiagram(c.id, store.activeDiagramId) })
     }
     items.push('---')
     items.push({ label: 'Delete Constraint', danger: true,
@@ -394,27 +393,29 @@ export default function Canvas() {
       const maxX = Math.max(dragState.wx, dragState.endWx)
       const minY = Math.min(dragState.wy, dragState.endWy)
       const maxY = Math.max(dragState.wy, dragState.endWy)
-      const inBand = (x, y) => x >= minX && x <= maxX && y >= minY && y <= maxY
-      const s = useOrmStore.getState()
+      const inBand    = (x, y) => x >= minX && x <= maxX && y >= minY && y <= maxY
+      const boxInBand = (b)    => b.left >= minX && b.right <= maxX && b.top >= minY && b.bottom <= maxY
+      // Use visibleOts/visibleFacts/visibleConstraints: they carry diagram-merged positions
+      // so the hit-test matches what is actually rendered on screen.
       const ids = [
-        ...s.objectTypes.filter(o => inBand(o.x, o.y)).map(o => o.id),
-        ...s.facts.filter(f => inBand(f.x, f.y)).map(f => f.id),
-        ...s.constraints.filter(c => inBand(c.x, c.y)).map(c => c.id),
-        ...s.subtypes.filter(st => {
-          const sub = s.objectTypes.find(o => o.id === st.subId)
-          const sup = s.objectTypes.find(o => o.id === st.superId)
+        ...visibleOts        .filter(o  => inBand(o.x, o.y))           .map(o  => o.id),
+        ...visibleFacts      .filter(f  => boxInBand(factBounds(f)))    .map(f  => f.id),
+        ...visibleConstraints.filter(c  => inBand(c.x, c.y))           .map(c  => c.id),
+        ...visibleSubtypes   .filter(st => {
+          const sub = visibleOts.find(o => o.id === st.subId)
+          const sup = visibleOts.find(o => o.id === st.superId)
           if (!sub || !sup) return false
           return inBand((sub.x + sup.x) / 2, (sub.y + sup.y) / 2)
         }).map(st => st.id),
       ]
       const finalIds = dragState.additive
-        ? [...new Set([...s.multiSelectedIds, ...ids])]
+        ? [...new Set([...store.multiSelectedIds, ...ids])]
         : ids
       store.setMultiSelection(finalIds)
     }
     setDragState(null)
     setBandRect(null)
-  }, [dragState, store])
+  }, [dragState, store, visibleOts, visibleFacts, visibleConstraints, visibleSubtypes])
 
   // ── wheel zoom ──────────────────────────────────────────────────────────
   const handleWheel = useCallback((e) => {

@@ -566,6 +566,7 @@ const CONSTRAINT_COLOR = {
   exclusion:        'var(--col-constraint)',
   inclusiveOr:      'var(--col-constraint)',
   exclusiveOr:      'var(--col-constraint)',
+  uniqueness:       'var(--col-constraint)',
   equality:         'var(--col-excl)',
   subset:           'var(--col-excl)',
   ring:             'var(--col-ring)',
