@@ -46,45 +46,13 @@ function useKeyboardShortcuts() {
       if (e.key === 'Delete' || e.key === 'Backspace') {
         const { selectedId, selectedKind, selectedUniqueness, uniquenessConstruction, multiSelectedIds, activeDiagramId } = store
 
-        const inAnyDiagram = (id) => {
-          const diagrams = useOrmStore.getState().diagrams
-          return diagrams.some(d => d.elementIds === null || d.elementIds.includes(id))
-        }
-        const purgeFromSchema = (id, kind) => {
-          const s = useOrmStore.getState()
-          if (kind === 'entity' || kind === 'value') { if (s.objectTypes.find(o => o.id === id)) store.deleteObjectType(id) }
-          else if (kind === 'fact')       { if (s.facts.find(f => f.id === id))       store.deleteFact(id) }
-          else if (kind === 'constraint') { if (s.constraints.find(c => c.id === id)) store.deleteConstraint(id) }
-        }
-
         if (multiSelectedIds.length > 0) {
-          const selSet = new Set(multiSelectedIds)
           const s0 = useOrmStore.getState()
-
-          // A constraint is removable only when every fact/OT it references is also in the selection
-          const constraintRemovable = (c) => {
-            const refs = new Set()
-            if (c.sequences) for (const seq of c.sequences) for (const m of seq) { if (m.kind === 'role' && m.factId) refs.add(m.factId) }
-            if (c.roleSequences) for (const seq of c.roleSequences) for (const r of seq) { if (r.factId) refs.add(r.factId) }
-            if (c.targetObjectTypeId) refs.add(c.targetObjectTypeId)
-            return refs.size > 0 && [...refs].every(id => selSet.has(id))
-          }
-
-          const idsToRemove = multiSelectedIds.filter(id => {
-            const c = s0.constraints.find(c => c.id === id)
-            return !c || constraintRemovable(c)
-          })
-
+          const idsToRemove = multiSelectedIds.filter(id =>
+            s0.objectTypes.some(o => o.id === id) || s0.facts.some(f => f.id === id)
+          )
           if (idsToRemove.length > 0) {
             store.removeMultiSelectionFromDiagram(activeDiagramId, idsToRemove)
-            for (const id of idsToRemove) {
-              if (!inAnyDiagram(id)) {
-                const s = useOrmStore.getState()
-                const ot = s.objectTypes.find(o => o.id === id)
-                if (ot) purgeFromSchema(id, ot.kind)
-                else if (s.facts.find(f => f.id === id)) purgeFromSchema(id, 'fact')
-              }
-            }
           } else {
             store.clearSelection()
           }
@@ -107,16 +75,9 @@ function useKeyboardShortcuts() {
           return
         }
         if (!selectedId) return
-        if (selectedKind === 'constraint') return  // constraints are never removed via keystroke
-        // Subtypes are not tracked in elementIds, so always remove from schema.
-        // Everything else is removed from the current diagram; if that was the last
-        // diagram containing it, also delete it from the schema.
-        if (selectedKind === 'subtype') {
-          store.deleteSubtype(selectedId)
-        } else {
-          store.removeElementFromDiagram(selectedId, activeDiagramId)
-          if (!inAnyDiagram(selectedId)) purgeFromSchema(selectedId, selectedKind)
-        }
+        if (selectedKind === 'constraint') return
+        if (selectedKind === 'subtype') return
+        store.removeElementFromDiagram(selectedId, activeDiagramId)
         return
       }
 

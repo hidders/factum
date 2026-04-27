@@ -177,7 +177,7 @@ export default function WelcomeScreen() {
           <kbd style={{ padding: '1px 5px', background:'var(--bg-deep)',
             border:'1px solid var(--border)', borderRadius:3 }}>U</kbd>
           ) — click the subtype entity, then the supertype.{' '}
-          <strong style={{ color: 'var(--ink-2)' }}>Constraint</strong> — click a constraint node, then role boxes or subtype edges to build groups.
+          <strong style={{ color: 'var(--ink-2)' }}>Constraint</strong> — click an external constraint, then role boxes or subtype relationships to build groups.
         </div>
       </div>
     </div>

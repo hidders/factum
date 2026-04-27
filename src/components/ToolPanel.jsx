@@ -49,7 +49,7 @@ export function EntityTypeIcon({ active }) {
   )
 }
 
-function ValueTypeIcon({ active }) {
+export function ValueTypeIcon({ active }) {
   return (
     <svg width={18} height={18} style={{ display: 'block', flexShrink: 0 }}>
       <rect x={0.6} y={3} width={16.8} height={12} rx={3.6}
@@ -81,7 +81,7 @@ export function NestedFactTypeIcon({ active }) {
   )
 }
 
-function NestedValueTypeIcon({ active }) {
+export function NestedValueTypeIcon({ active }) {
   const valueStroke  = active ? '#fff' : 'var(--col-value)'
   const factStroke   = active ? 'rgba(255,255,255,0.85)' : 'var(--col-fact)'
   const fill         = active ? 'rgba(255,255,255,0.15)' : '#ffffff'
@@ -132,7 +132,7 @@ function RoleIcon({ active }) {
   )
 }
 
-function SubtypeIcon({ active }) {
+export function SubtypeIcon({ active }) {
   const colour = active ? '#fff' : 'var(--col-subtype)'
   return (
     <svg width={18} height={18} style={{ display: 'block', flexShrink: 0 }}>
@@ -163,7 +163,7 @@ function TargetConnectorIcon({ active }) {
   )
 }
 
-function ExclusionConstraintIcon() {
+export function ExclusionConstraintIcon() {
   const cx = 9, cy = 9, r = 7.2, d = r * 0.707
   return (
     <svg width={18} height={18} style={{ display: 'block', flexShrink: 0 }}>
@@ -176,7 +176,7 @@ function ExclusionConstraintIcon() {
   )
 }
 
-function ValueComparisonConstraintIcon() {
+export function ValueComparisonConstraintIcon() {
   const cx = 9, cy = 9, r = 7.2
   return (
     <svg width={18} height={18} style={{ display: 'block', flexShrink: 0 }}>
@@ -191,7 +191,7 @@ function ValueComparisonConstraintIcon() {
   )
 }
 
-function RingConstraintIcon() {
+export function RingConstraintIcon() {
   const cx = 9, cy = 9, r = 7.2
   const rt = 6
   const tx  = cx,          ty  = cy - rt
@@ -208,7 +208,7 @@ function RingConstraintIcon() {
   )
 }
 
-function FrequencyConstraintIcon() {
+export function FrequencyConstraintIcon() {
   const cx = 9, cy = 9, r = 7.2
   return (
     <svg width={18} height={18} style={{ display: 'block', flexShrink: 0 }}>
@@ -221,7 +221,7 @@ function FrequencyConstraintIcon() {
   )
 }
 
-function SubsetConstraintIcon() {
+export function SubsetConstraintIcon() {
   const cx = 9, cy = 9, r = 7.2
   return (
     <svg width={18} height={18} style={{ display: 'block', flexShrink: 0 }}>
@@ -234,7 +234,7 @@ function SubsetConstraintIcon() {
   )
 }
 
-function EqualityConstraintIcon() {
+export function EqualityConstraintIcon() {
   const cx = 9, cy = 9, r = 7.2
   return (
     <svg width={18} height={18} style={{ display: 'block', flexShrink: 0 }}>
@@ -247,7 +247,7 @@ function EqualityConstraintIcon() {
   )
 }
 
-function InclusiveOrConstraintIcon() {
+export function InclusiveOrConstraintIcon() {
   const cx = 9, cy = 9, r = 7.2
   return (
     <svg width={18} height={18} style={{ display: 'block', flexShrink: 0 }}>
@@ -257,7 +257,7 @@ function InclusiveOrConstraintIcon() {
   )
 }
 
-function UniquenessConstraintIcon() {
+export function UniquenessConstraintIcon() {
   const cx = 9, cy = 9, r = 7.2
   return (
     <svg width={18} height={18} style={{ display: 'block', flexShrink: 0 }}>
@@ -268,7 +268,7 @@ function UniquenessConstraintIcon() {
   )
 }
 
-function SubtypeConstraintIcon() {
+export function SubtypeConstraintIcon() {
   const cx = 9, cy = 9, r = 7.2, d = r * 0.707
   return (
     <svg width={18} height={18} style={{ display: 'block', flexShrink: 0 }}>

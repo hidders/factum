@@ -1,4 +1,5 @@
 import React, { useRef, useCallback, useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { useOrmStore } from '../store/ormStore'
 import { useDiagramElements } from '../hooks/useDiagramElements'
 import ObjectTypeNode from './ObjectTypeNode'
@@ -29,14 +30,13 @@ export default function Canvas() {
 
   const closeContextMenu = useCallback(() => setContextMenu(null), [])
 
-  // True when an element appears in more than one diagram (show-all counts as containing every element)
-  const isInMultipleDiagrams = (id) =>
-    (store.diagrams ?? []).filter(d => d.elementIds === null || d.elementIds.includes(id)).length > 1
-
-  const handleMultiSelectionContextMenu = useCallback((e) => {
+const handleMultiSelectionContextMenu = useCallback((e) => {
     e.preventDefault()
     e.stopPropagation()
     const canAlign = store.multiSelectedIds.length >= 2
+    const idsToRemove = store.multiSelectedIds.filter(id =>
+      store.objectTypes.some(o => o.id === id) || store.facts.some(f => f.id === id)
+    )
     setContextMenu({
       x: e.clientX, y: e.clientY,
       items: [
@@ -44,6 +44,11 @@ export default function Canvas() {
           action: () => store.alignMultiSelection('y') },
         { label: 'Align vertically', disabled: !canAlign,
           action: () => store.alignMultiSelection('x') },
+        '---',
+        { label: 'Remove from Diagram', disabled: idsToRemove.length === 0,
+          action: () => store.removeMultiSelectionFromDiagram(store.activeDiagramId, idsToRemove) },
+        { label: 'Delete Selection', danger: true,
+          action: () => store.deleteMultiSelection() },
       ],
     })
   }, [store])
@@ -60,10 +65,9 @@ export default function Canvas() {
       items: [
         { label: ot.kind === 'entity' ? 'Change to Value Type' : 'Change to Entity Type',
           action: () => store.updateObjectType(ot.id, { kind: ot.kind === 'entity' ? 'value' : 'entity' }) },
-        ...(isInMultipleDiagrams(ot.id) ? ['---',
-          { label: 'Remove from Diagram',
-            action: () => store.removeElementFromDiagram(ot.id, store.activeDiagramId) },
-        ] : []),
+        '---',
+        { label: 'Remove from Diagram',
+          action: () => store.removeElementFromDiagram(ot.id, store.activeDiagramId) },
         '---',
         { label: `Delete ${ot.kind === 'entity' ? 'Entity' : 'Value'} Type`,
           danger: true, action: () => store.deleteObjectType(ot.id) },
@@ -168,13 +172,51 @@ export default function Canvas() {
             ] : []),
           ],
         },
-        ...(isInMultipleDiagrams(fact.id) ? ['---',
-          { label: 'Remove from Diagram',
-            action: () => store.removeElementFromDiagram(fact.id, store.activeDiagramId) },
-        ] : []),
         '---',
-        { label: 'Delete Fact Type',
+        { label: 'Remove from Diagram',
+          action: () => store.removeElementFromDiagram(fact.id, store.activeDiagramId) },
+        '---',
+        { label: fact.objectified
+            ? (fact.objectifiedKind === 'value' ? 'Delete Nested Value Type' : 'Delete Nested Entity Type')
+            : 'Delete Fact Type',
           danger: true, action: () => store.deleteFact(fact.id) },
+      ],
+    })
+  }, [store])
+
+  const handleUniquenessBarContextMenu = useCallback((fact, ui, e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const uRoles = fact.uniqueness[ui]
+    if (!uRoles) return
+    const prefKey = fact.preferredUniqueness
+      ? JSON.stringify([...fact.preferredUniqueness].sort((a, b) => a - b))
+      : null
+    const isPreferred = prefKey !== null &&
+      JSON.stringify([...uRoles].sort((a, b) => a - b)) === prefKey
+    setContextMenu({
+      x: e.clientX, y: e.clientY,
+      items: [
+        { label: 'Is Preferred', checked: isPreferred,
+          action: () => store.setPreferredUniqueness(fact.id, uRoles) },
+        '---',
+        { label: 'Delete Uniqueness Constraint', danger: true,
+          action: () => store.toggleUniqueness(fact.id, uRoles) },
+      ],
+    })
+  }, [store])
+
+  const handleSubtypeContextMenu = useCallback((st, e) => {
+    if (store.multiSelectedIds.length > 1 && store.multiSelectedIds.includes(st.id)) {
+      return handleMultiSelectionContextMenu(e)
+    }
+    e.preventDefault()
+    e.stopPropagation()
+    store.select(st.id, 'subtype')
+    setContextMenu({
+      x: e.clientX, y: e.clientY,
+      items: [
+        { label: 'Delete Subtype Relationship', danger: true, action: () => store.deleteSubtype(st.id) },
       ],
     })
   }, [store])
@@ -543,12 +585,13 @@ export default function Canvas() {
         <rect className="canvas-bg" width="100%" height="100%" fill="url(#gridLg)"/>
 
         <g transform={`translate(${store.pan.x},${store.pan.y}) scale(${store.zoom})`}>
-          <SubtypeArrows  mousePos={mousePos}/>
+          <SubtypeArrows  mousePos={mousePos} onContextMenu={handleSubtypeContextMenu}/>
           {visibleFacts.map(f => (
             <FactTypeNode key={f.id} fact={f} onDragStart={handleDragStart}
               isShared={sharedIds.has(f.id)}
               onContextMenu={(e) => handleFactContextMenu(f, e)}
-              onRoleContextMenu={(roleIndex, e) => handleRoleContextMenu(f, roleIndex, e)}/>
+              onRoleContextMenu={(roleIndex, e) => handleRoleContextMenu(f, roleIndex, e)}
+              onBarContextMenu={(ui, e) => handleUniquenessBarContextMenu(f, ui, e)}/>
           ))}
           <RoleConnectors mousePos={mousePos}/>
           {visibleOts.map(ot => (
@@ -598,12 +641,13 @@ export default function Canvas() {
       {/* Minimap overlay */}
       <Minimap/>
 
-      {/* Context menu */}
-      {contextMenu && (
+      {/* Context menu — rendered via portal at document.body to escape all stacking contexts */}
+      {contextMenu && createPortal(
         <ContextMenu
           x={contextMenu.x} y={contextMenu.y}
           items={contextMenu.items}
-          onClose={closeContextMenu}/>
+          onClose={closeContextMenu}/>,
+        document.body
       )}
 
       {/* Snap indicator */}

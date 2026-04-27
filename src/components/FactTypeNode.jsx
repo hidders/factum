@@ -143,6 +143,7 @@ export function getDisplayReading(fact) {
 const BAR_H       = 3    // stroke width of each uniqueness bar
 const BAR_MARGIN  = 4    // gap between top of role box and lowest bar
 const BAR_SPACING = 5    // vertical distance between successive bar levels
+const PREF_OFFSET = 2.5  // shift for preferred uniqueness bar (keeps inner line at original pos)
 const UNARY_CAP_R = 8
 
 export function roleCenter(fact, roleIndex) {
@@ -191,7 +192,7 @@ export function factBounds(fact) {
   }
 }
 
-export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleContextMenu, isShared }) {
+export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleContextMenu, onBarContextMenu, isShared }) {
   const store = useOrmStore()
   const isSelected     = store.selectedId === fact.id || store.multiSelectedIds.includes(fact.id)
   const hasSelectedRole = store.selectedRole?.factId === fact.id
@@ -556,6 +557,8 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
   const isVertical = fact.orientation === 'vertical'
 
   // ── Uniqueness bar level assignment ────────────────────────────────────────
+  // The uniqueness array is kept sorted in the store (ascending role count),
+  // so level assignment here is simply positional.
   const hasUnary = fact.uniqueness.some(u => u.length === 1)
   let multiLevel = hasUnary ? 0 : -1
   const levels = fact.uniqueness.map(uRoles =>
@@ -566,11 +569,30 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
   const INSET = 2
   const FONT = "'Segoe UI', Helvetica, Arial, sans-serif"
   const barsBelow = !!fact.uniquenessBelow
+  const prefKey = fact.preferredUniqueness
+    ? JSON.stringify([...fact.preferredUniqueness].sort((a, b) => a - b))
+    : null
+  const pIdx = prefKey !== null
+    ? fact.uniqueness.findIndex(u => JSON.stringify([...u].sort((a, b) => a - b)) === prefKey)
+    : -1
+  const pLevel = pIdx >= 0 ? levels[pIdx] : -1
 
   // Bar coordinate helpers
   const barY_h = (level) => barsBelow
     ? topY + ROLE_H + BAR_MARGIN + BAR_SPACING * (level + 1) - BAR_H / 2
     : topY - BAR_MARGIN - BAR_SPACING * (level + 1) + BAR_H / 2
+
+  // Adjust barY to keep the preferred bar's inner line at the original position,
+  // and shift bars further from role boxes (above the preferred) by the same amount.
+  const adjustedBarY = (level, isThisPreferred) => {
+    if (pLevel < 0) return barY_h(level)
+    const isAbove = level > pLevel  // further from role boxes in both orientations
+    // Bars above shift by 2×PREF_OFFSET so their gap from the preferred outer line
+    // equals the normal BAR_SPACING; the preferred bar itself shifts by 1×PREF_OFFSET.
+    const shiftCount = (isAbove ? 2 : 0) + (isThisPreferred ? 1 : 0)
+    const dir = barsBelow ? 1 : -1  // positive = away from role boxes
+    return barY_h(level) + dir * PREF_OFFSET * shiftCount
+  }
 
   // ── Horizontal helpers ─────────────────────────────────────────────────────
   function buildRuns(uRoles, level, ui) {
@@ -606,6 +628,15 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
   const barX_v = (level) => barsBelow
     ? leftX_v - BAR_MARGIN - BAR_SPACING * (level + 1) + BAR_H / 2
     : leftX_v + ROLE_H + BAR_MARGIN + BAR_SPACING * (level + 1) - BAR_H / 2
+
+  // Adjust barX similarly: inner line of preferred stays put; bars further away shift outward.
+  const adjustedBarX = (level, isThisPreferred) => {
+    if (pLevel < 0) return barX_v(level)
+    const isAbove = level > pLevel
+    const shiftCount = (isAbove ? 2 : 0) + (isThisPreferred ? 1 : 0)
+    const dir = barsBelow ? -1 : 1  // barsBelow=false → bars right (+X); barsBelow=true → bars left (-X)
+    return barX_v(level) + dir * PREF_OFFSET * shiftCount
+  }
 
   function buildRunsV(uRoles, level, ui) {
     const roleSet = new Set(uRoles)
@@ -1082,21 +1113,43 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
               )
             }
 
-            const { barX, runs } = buildRunsV(displayRoles, displayLevel, ui)
+            const { barX: rawBarX, runs } = buildRunsV(displayRoles, displayLevel, ui)
             const minRI = Math.min(...displayRoles), maxRI = Math.max(...displayRoles)
             const hitY1 = startY_v + minRI * (ROLE_W + ROLE_GAP)
             const hitY2 = startY_v + maxRI * (ROLE_W + ROLE_GAP) + ROLE_W
+            const isPreferred = prefKey !== null &&
+              JSON.stringify([...uRoles].sort((a, b) => a - b)) === prefKey
+            const barX = adjustedBarX(displayLevel, isPreferred)
+            const sw = isUSelected ? BAR_H + 1 : BAR_H
             return (
               <g key={ui} style={{ cursor: 'pointer' }}
-                onMouseDown={e => e.stopPropagation()} onClick={barClickHandler(ui)}>
+                onMouseDown={e => e.stopPropagation()} onClick={barClickHandler(ui)}
+                onContextMenu={e => { e.preventDefault(); e.stopPropagation(); onBarContextMenu?.(ui, e) }}>
                 <line x1={barX} y1={hitY1} x2={barX} y2={hitY2} stroke="transparent" strokeWidth={10}/>
-                {runs.map(({ y1, y2, solid, key }) => (
-                  <line key={key} x1={barX} y1={y1} x2={barX} y2={y2}
-                    stroke={barStroke} strokeWidth={isUSelected ? BAR_H + 1 : BAR_H}
-                    strokeLinecap="butt"
-                    strokeDasharray={solid ? 'none' : '3 3'}
-                    strokeOpacity={solid ? 1 : 0.6}/>
-                ))}
+                {isPreferred ? (
+                  <>
+                    {/* Solid runs: two lines at ±PREF_OFFSET */}
+                    {[-PREF_OFFSET, PREF_OFFSET].map(dx =>
+                      runs.filter(r => r.solid).map(({ y1, y2, key }) => (
+                        <line key={`${key}-${dx}`} x1={barX + dx} y1={y1} x2={barX + dx} y2={y2}
+                          stroke={barStroke} strokeWidth={sw} strokeLinecap="butt"/>
+                      ))
+                    )}
+                    {/* Dashed runs: single line at midpoint between the two bars */}
+                    {runs.filter(r => !r.solid).map(({ y1, y2, key }) => (
+                      <line key={`${key}-mid`} x1={barX} y1={y1} x2={barX} y2={y2}
+                        stroke={barStroke} strokeWidth={sw} strokeLinecap="butt"
+                        strokeDasharray="3 3" strokeOpacity={0.6}/>
+                    ))}
+                  </>
+                ) : (
+                  runs.map(({ y1, y2, solid, key }) => (
+                    <line key={`${key}-0`} x1={barX} y1={y1} x2={barX} y2={y2}
+                      stroke={barStroke} strokeWidth={sw} strokeLinecap="butt"
+                      strokeDasharray={solid ? 'none' : '3 3'}
+                      strokeOpacity={solid ? 1 : 0.6}/>
+                  ))
+                )}
               </g>
             )
           })}
@@ -1104,7 +1157,7 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
           {/* Construction preview bar (vertical) */}
           {inConstruction && store.uniquenessConstruction?.uIndex == null && (() => {
             const previewLevel = multiCount + 1
-            const barX = barX_v(previewLevel)
+            const barX = adjustedBarX(previewLevel, false)
             if (ucRoles.length === 0) {
               return (
                 <g style={{ pointerEvents: 'none' }}>
@@ -1197,22 +1250,43 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
               )
             }
 
-            const { barY, runs } = buildRuns(displayRoles, displayLevel, ui)
+            const { barY: rawBarY, runs } = buildRuns(displayRoles, displayLevel, ui)
             const minRI = Math.min(...displayRoles), maxRI = Math.max(...displayRoles)
             const hitX1 = startX + minRI * (ROLE_W + ROLE_GAP)
             const hitX2 = startX + maxRI * (ROLE_W + ROLE_GAP) + ROLE_W
+            const isPreferred = prefKey !== null &&
+              JSON.stringify([...uRoles].sort((a, b) => a - b)) === prefKey
+            const barY = adjustedBarY(displayLevel, isPreferred)
+            const sw = isUSelected ? BAR_H + 1 : BAR_H
             return (
               <g key={ui} style={{ cursor: 'pointer' }}
-                onMouseDown={e => e.stopPropagation()} onClick={barClickHandler(ui)}>
+                onMouseDown={e => e.stopPropagation()} onClick={barClickHandler(ui)}
+                onContextMenu={e => { e.preventDefault(); e.stopPropagation(); onBarContextMenu?.(ui, e) }}>
                 <line x1={hitX1} y1={barY} x2={hitX2} y2={barY} stroke="transparent" strokeWidth={10}/>
-                {runs.map(({ x1, x2, solid, key }) => (
-                  <line key={key} x1={x1} y1={barY} x2={x2} y2={barY}
-                    stroke={barStroke}
-                    strokeWidth={isUSelected ? BAR_H + 1 : BAR_H}
-                    strokeLinecap="butt"
-                    strokeDasharray={solid ? 'none' : '3 3'}
-                    strokeOpacity={solid ? 1 : 0.6}/>
-                ))}
+                {isPreferred ? (
+                  <>
+                    {/* Solid runs: two lines at ±PREF_OFFSET */}
+                    {[-PREF_OFFSET, PREF_OFFSET].map(dy =>
+                      runs.filter(r => r.solid).map(({ x1, x2, key }) => (
+                        <line key={`${key}-${dy}`} x1={x1} y1={barY + dy} x2={x2} y2={barY + dy}
+                          stroke={barStroke} strokeWidth={sw} strokeLinecap="butt"/>
+                      ))
+                    )}
+                    {/* Dashed runs: single line at midpoint between the two bars */}
+                    {runs.filter(r => !r.solid).map(({ x1, x2, key }) => (
+                      <line key={`${key}-mid`} x1={x1} y1={barY} x2={x2} y2={barY}
+                        stroke={barStroke} strokeWidth={sw} strokeLinecap="butt"
+                        strokeDasharray="3 3" strokeOpacity={0.6}/>
+                    ))}
+                  </>
+                ) : (
+                  runs.map(({ x1, x2, solid, key }) => (
+                    <line key={`${key}-0`} x1={x1} y1={barY} x2={x2} y2={barY}
+                      stroke={barStroke} strokeWidth={sw} strokeLinecap="butt"
+                      strokeDasharray={solid ? 'none' : '3 3'}
+                      strokeOpacity={solid ? 1 : 0.6}/>
+                  ))
+                )}
               </g>
             )
           })}
@@ -1220,7 +1294,7 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
           {/* Construction preview bar (horizontal) */}
           {inConstruction && store.uniquenessConstruction?.uIndex == null && (() => {
             const previewLevel = multiCount + 1
-            const barY = barY_h(previewLevel)
+            const barY = adjustedBarY(previewLevel, false)
             if (ucRoles.length === 0) {
               return (
                 <g style={{ pointerEvents: 'none' }}>

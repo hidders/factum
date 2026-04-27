@@ -23,7 +23,7 @@ function playerBounds(id, otMap, nestedMap) {
   return null
 }
 
-export default function SubtypeArrows({ mousePos }) {
+export default function SubtypeArrows({ mousePos, onContextMenu }) {
   const store     = useOrmStore()
   const { objectTypes, facts, subtypes } = useDiagramElements()
   const otMap     = Object.fromEntries(objectTypes.map(o => [o.id, o]))
@@ -67,6 +67,7 @@ export default function SubtypeArrows({ mousePos }) {
 
         return (
           <g key={st.id}
+            onContextMenu={(e) => onContextMenu?.(st, e)}
             onClick={(e) => {
               e.stopPropagation()
               if (store.sequenceConstruction) {

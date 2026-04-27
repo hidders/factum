@@ -85,9 +85,12 @@ export default function ContextMenu({ x, y, items, onClose }) {
   const vw = window.innerWidth
   const vh = window.innerHeight
   const estW = 180
-  const estH = items.length * 30
+  // Separators render at ~7px; regular items at ~26px; plus 8px panel padding
+  const estH = items.reduce((h, item) => h + (item === '---' ? 7 : 26), 8)
   const left = x + estW > vw ? Math.max(0, vw - estW - 4) : x
-  const top  = y + estH > vh ? Math.max(0, y - estH)       : y
+  const top  = y + estH <= vh ? y
+             : y - estH >= 0  ? y - estH
+             : Math.max(0, vh - estH)
 
   useEffect(() => {
     const onMouseDown = (e) => {
@@ -133,7 +136,7 @@ export default function ContextMenu({ x, y, items, onClose }) {
     // Zero-size wrapper — only purpose is to group both panels for the outside-click test
     <div ref={wrapRef} style={{ position: 'fixed', top: 0, left: 0, width: 0, height: 0 }}>
       <MenuPanel
-        left={left} top={top} items={items} zIndex={2000}
+        left={left} top={top} items={items} zIndex={10100}
         onClose={onClose}
         onSubmenuEnter={handleSubmenuEnter}
         onSubmenuLeave={scheduleClose}
@@ -147,7 +150,7 @@ export default function ContextMenu({ x, y, items, onClose }) {
             border: '1px solid var(--border)',
             borderRadius: 6,
             boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
-            zIndex: 2001,
+            zIndex: 10101,
             minWidth: 170,
             padding: '4px 0',
             userSelect: 'none',

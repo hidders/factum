@@ -12,8 +12,8 @@ const HINTS = {
   toggleMandatory:       '● Click a role box to toggle its mandatory constraint on/off',
   addInternalUniqueness: '▔ Click a fact type to start adding an internal uniqueness constraint',
   addSubtype:        '⊂ Click source entity, then target entity to draw a subtype arrow',
-  connectConstraint:    '⊗ Click a constraint node, then role boxes or subtype edges to build sequences · Enter to commit',
-  addTargetConnector:   '⊷ Click a constraint node, then an object type to set its Target Object Name',
+  connectConstraint:    '⊗ Click an external constraint, then role boxes or subtype relationships to build sequences · Enter to commit',
+  addTargetConnector:   '⊷ Click an external constraint, then an object type to set its Target Object Name',
 }
 
 export default function StatusBar() {
@@ -28,7 +28,7 @@ export default function StatusBar() {
   const hint = factHint
     || HINTS[store.tool]
     || (store.tool.startsWith('addConstraint:')
-        ? `⊗ Click canvas to place a ${store.tool.split(':')[1]} constraint node`
+        ? `⊗ Click canvas to place a ${store.tool.split(':')[1]} external constraint`
         : '')
 
   return (

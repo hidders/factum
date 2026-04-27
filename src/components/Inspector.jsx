@@ -111,6 +111,58 @@ function Section({ title, children }) {
 }
 function Row({ children }) { return <div style={{ marginBottom: 8 }}>{children}</div> }
 
+// ── Diagrams-containing list ─────────────────────────────────────────────────
+// Shows which diagrams contain the given element, in tab order.
+// subtypeEndpointIds: [subId, superId] — for subtypes both endpoints must be in the diagram.
+function DiagramList({ elementId, kind, subtypeEndpointIds }) {
+  const store = useOrmStore()
+  const { diagrams } = store
+  const containing = diagrams.filter(d => {
+    if (subtypeEndpointIds) {
+      const [a, b] = subtypeEndpointIds
+      return d.elementIds === null ||
+        ((d.elementIds ?? []).includes(a) && (d.elementIds ?? []).includes(b))
+    }
+    return d.elementIds === null || (d.elementIds ?? []).includes(elementId)
+  })
+  const handleClick = (d) => {
+    store.setActiveDiagram(d.id)
+    store.select(elementId, kind)
+  }
+  return (
+    <Row>
+      <Label>Appears in</Label>
+      {containing.length === 0 ? (
+        <span style={{ fontSize: 11, color: '#c0392b', fontStyle: 'italic' }}>
+          not in any diagram (orphaned)
+        </span>
+      ) : (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+          {containing.map(d => (
+            <span key={d.id} onClick={() => handleClick(d)}
+              style={{
+                fontSize: 10, padding: '1px 6px',
+                background: 'var(--bg-raised)', border: '1px solid var(--border-soft)',
+                borderRadius: 3, color: 'var(--ink-2)', cursor: 'pointer',
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.background = 'var(--accent)'
+                e.currentTarget.style.color = 'white'
+                e.currentTarget.style.borderColor = 'var(--accent)'
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.background = 'var(--bg-raised)'
+                e.currentTarget.style.color = 'var(--ink-2)'
+                e.currentTarget.style.borderColor = 'var(--border-soft)'
+              }}
+            >{d.name}</span>
+          ))}
+        </div>
+      )}
+    </Row>
+  )
+}
+
 function TInput({ value, onChange, placeholder }) {
   return <input value={value ?? ''} onChange={e => onChange(e.target.value)}
     placeholder={placeholder} style={{ width: '100%' }} />
@@ -285,6 +337,7 @@ function ObjectTypeInspector({ ot }) {
           onChange={vr => store.updateObjectType(ot.id, { valueRange: vr })}
         />
       </Row>
+      <DiagramList elementId={ot.id} kind={ot.kind} />
       <DangerBtn onClick={() => store.deleteObjectType(ot.id)}>
         Delete {ot.kind === 'entity' ? 'Entity' : 'Value'} Type
       </DangerBtn>
@@ -833,7 +886,12 @@ function FactInspector({ fact }) {
           </Row>
         )}
 
-        <DangerBtn onClick={() => store.deleteFact(fact.id)}>Delete Fact Type</DangerBtn>
+        <DiagramList elementId={fact.id} kind="fact" />
+        <DangerBtn onClick={() => store.deleteFact(fact.id)}>
+          {fact.objectified
+            ? (fact.objectifiedKind === 'value' ? 'Delete Nested Value Type' : 'Delete Nested Entity Type')
+            : 'Delete Fact Type'}
+        </DangerBtn>
       </Section>
 
       <Section title="Roles">
@@ -844,15 +902,27 @@ function FactInspector({ fact }) {
         {fact.uniqueness.length === 0 && (
           <div style={{ color: 'var(--ink-muted)', fontSize: 11, marginBottom: 8 }}>None defined</div>
         )}
-        {fact.uniqueness.map((u, ui) => (
-          <div key={ui} style={{ display: 'flex', justifyContent: 'space-between',
-            alignItems: 'center', marginBottom: 4, fontSize: 12 }}>
-            <span>Roles: {u.map(i => i + 1).join(', ')}</span>
-            <button onClick={() => store.toggleUniqueness(fact.id, u)}
-              style={{ background: 'none', color: '#c0392b', border: 'none',
-                cursor: 'pointer', fontSize: 12 }}>✕</button>
-          </div>
-        ))}
+        {fact.uniqueness.map((u, ui) => {
+          const isPreferred = fact.preferredUniqueness != null &&
+            JSON.stringify([...fact.preferredUniqueness].sort()) === JSON.stringify([...u].sort())
+          return (
+            <div key={ui} style={{ display: 'flex', justifyContent: 'space-between',
+              alignItems: 'center', marginBottom: 4, fontSize: 12 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
+                <input type="radio" name={`pref-${fact.id}`} checked={isPreferred}
+                  onChange={() => {}}
+                  onClick={() => store.setPreferredUniqueness(fact.id, u)}
+                  style={{ cursor: 'pointer', accentColor: 'var(--col-mandatory)' }}/>
+                <span>Roles: {u.map(i => i + 1).join(', ')}</span>
+              </label>
+              <div style={{ display: 'flex', alignItems: 'center' }}>
+                <button onClick={() => store.toggleUniqueness(fact.id, u)}
+                  style={{ background: 'none', color: '#c0392b', border: 'none',
+                    cursor: 'pointer', fontSize: 12 }}>✕</button>
+              </div>
+            </div>
+          )
+        })}
         {fact.arity > 1 && (
           <button onClick={() => store.startUniquenessConstruction(fact.id)}
             style={{ marginTop: 6, padding: '4px 10px', fontSize: 11,
@@ -891,6 +961,7 @@ function SubtypeInspector({ st }) {
           onChange={v => store.updateSubtype(st.id, { inheritsPreferredIdentifier: v })}
         />
       </Row>
+      <DiagramList elementId={st.id} kind="subtype" subtypeEndpointIds={[st.subId, st.superId]} />
       <div style={{ marginTop: 8 }}>
         <DangerBtn onClick={() => store.deleteSubtype(st.id)}>Delete</DangerBtn>
       </div>
@@ -1142,7 +1213,7 @@ function ExternalConstraintInspector({ c }) {
                 padding: '3px 6px', marginBottom: 3, fontWeight: 600 }}>
                 ⚠ {gc.warning}
               </div>
-            : <div style={{ opacity: 0.85 }}>Click a role box or subtype edge on the canvas · Enter to commit.</div>
+            : <div style={{ opacity: 0.85 }}>Click a role box or subtype relationship on the canvas · Enter to commit.</div>
           }
           <button onClick={() => store.abandonSequenceConstruction()}
             style={{ marginTop: 6, padding: '2px 8px', fontSize: 10, background: 'rgba(255,255,255,0.2)',
@@ -1280,6 +1351,7 @@ function ExternalConstraintInspector({ c }) {
         </div>
       )}
 
+      <DiagramList elementId={c.id} kind="constraint" />
       <DangerBtn onClick={() => store.deleteConstraint(c.id)}>Delete Constraint</DangerBtn>
     </Section>
   )
@@ -1355,6 +1427,7 @@ function ConstraintInspector({ c }) {
         </div>
       ))}
 
+      <DiagramList elementId={c.id} kind="constraint" />
       <div style={{ marginTop: 8 }}>
         <DangerBtn onClick={() => store.deleteConstraint(c.id)}>Delete Constraint</DangerBtn>
       </div>

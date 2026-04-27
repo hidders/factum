@@ -32,6 +32,7 @@ const mkFact = (x, y, arity = 2) => ({
   alternativeReadings: [],
   readingDisplay: 'forward',   // 'forward' | 'both' | 'reverse'
   uniqueness: [],
+  preferredUniqueness: null,
   orientation: 'horizontal',   // 'horizontal' | 'vertical'
   readingOffset: null,         // { dx, dy } relative to fact centre, or null for auto
   readingAbove: false,         // show reading above (horizontal) or right (vertical)
@@ -65,7 +66,7 @@ const mkConstraint = (type, x, y) => ({
 
 // elementIds: null  = no filter, show all elements (default / first diagram)
 // elementIds: []    = intentionally empty (new user-created diagram)
-const mkDiagram = (name = 'Main') => ({ id: uid(), name, elementIds: null, positions: {} })
+const mkDiagram = (name = 'Main') => ({ id: uid(), name, elementIds: null, positions: {}, multiSelectedIds: [] })
 
 // ── name uniqueness ───────────────────────────────────────────────────────────
 // Strip trailing digits → find smallest N ≥ 1 such that base+N ∉ usedNames.
@@ -85,6 +86,29 @@ function purgeOrphanedConstraints(diagrams, constraints) {
   const inAnyDiagram = (id) => diagrams.some(d => d.elementIds === null || d.elementIds.includes(id))
   const kept = constraints.filter(c => inAnyDiagram(c.id))
   return kept.length === constraints.length ? constraints : kept
+}
+
+// ── principle 3 closure ───────────────────────────────────────────────────────
+// For every fact (or objectified fact) in the seed set, transitively add all
+// role-player object types / objectified facts.  This ensures that any diagram
+// (or clipboard) that contains a fact also contains all the OTs it references.
+function closeUnderPrinciple3(seedIds, { facts, objectTypes }) {
+  const result = new Set(seedIds)
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const f of facts) {
+      if (!result.has(f.id)) continue
+      for (const r of f.roles) {
+        if (!r.objectTypeId || result.has(r.objectTypeId)) continue
+        const exists =
+          objectTypes.some(o => o.id === r.objectTypeId) ||
+          facts.some(f2 => f2.id === r.objectTypeId && f2.objectified)
+        if (exists) { result.add(r.objectTypeId); changed = true }
+      }
+    }
+  }
+  return result
 }
 
 // ── cascade removal ───────────────────────────────────────────────────────────
@@ -299,46 +323,23 @@ export const useOrmStore = create((set, get) => ({
 
   // ── clipboard ──────────────────────────────────────────────────────────
 
-  // When the clipboard is replaced, purge any elements from the old clipboard
-  // that are now orphaned (not in any diagram and not in the new clipboard).
-  _purgeOrphanedFromClipboard(oldClipboard, newClipboard) {
-    if (!oldClipboard) return
-    const newIds = new Set([
-      ...(newClipboard?.objectTypes ?? []).map(o => o.id),
-      ...(newClipboard?.facts       ?? []).map(f => f.id),
-      ...(newClipboard?.constraints ?? []).map(c => c.id),
-    ])
-    const inAnyDiagram = (id) =>
-      get().diagrams.some(d => d.elementIds === null || d.elementIds.includes(id))
-
-    // Delete facts first so that deleteObjectType doesn't see stale role refs
-    for (const f of (oldClipboard.facts ?? [])) {
-      if (!newIds.has(f.id) && !inAnyDiagram(f.id) && get().facts.find(ft => ft.id === f.id))
-        get().deleteFact(f.id)
-    }
-    for (const o of (oldClipboard.objectTypes ?? [])) {
-      if (!newIds.has(o.id) && !inAnyDiagram(o.id) && get().objectTypes.find(ot => ot.id === o.id))
-        get().deleteObjectType(o.id)
-    }
-    for (const c of (oldClipboard.constraints ?? [])) {
-      if (!newIds.has(c.id) && !inAnyDiagram(c.id) && get().constraints.find(ct => ct.id === c.id))
-        get().deleteConstraint(c.id)
-    }
-  },
-
   copySelection() {
     const { selectedId, multiSelectedIds, objectTypes, facts, constraints, subtypes } = get()
     const ids = new Set(multiSelectedIds.length > 0 ? multiSelectedIds : selectedId ? [selectedId] : [])
     if (ids.size === 0) return
-    const copiedOts   = objectTypes.filter(o => ids.has(o.id))
-    const copiedFacts = facts.filter(f => ids.has(f.id))
-    const copiedCons  = constraints.filter(c => ids.has(c.id))
-    const otIds = new Set(copiedOts.map(o => o.id))
-    // Subtypes only when both endpoints are in the copied set
-    const copiedSts = subtypes.filter(st => otIds.has(st.subId) && otIds.has(st.superId))
+
+    // Principle 3: expand to include role-player OTs for every fact in the selection
+    const expandedIds = closeUnderPrinciple3([...ids], { facts, objectTypes })
+
+    const copiedOts   = objectTypes.filter(o => expandedIds.has(o.id))
+    const copiedFacts = facts.filter(f => expandedIds.has(f.id))
+    // Principle 2: only include explicitly-selected constraints whose referenced
+    // elements are all present in the expanded set
+    const selectedCons = constraints.filter(c => ids.has(c.id))
+    const copiedCons  = eligibleConstraints(selectedCons, subtypes, expandedIds)
+    // Principle 1: auto-include subtypes whose both endpoints are in expanded set
+    const copiedSts = subtypes.filter(st => expandedIds.has(st.subId) && expandedIds.has(st.superId))
     const newClipboard = { objectTypes: copiedOts, facts: copiedFacts, constraints: copiedCons, subtypes: copiedSts }
-    // Purge old clipboard elements that are now orphaned (clipboard is being replaced)
-    get()._purgeOrphanedFromClipboard(get().clipboard, newClipboard)
     set({ clipboard: newClipboard })
   },
 
@@ -354,31 +355,41 @@ export const useOrmStore = create((set, get) => ({
     }
     if (!selectedId) return
     if (selectedKind === 'subtype') {
-      // Subtypes have no diagram membership, so delete from schema immediately
+      // Subtypes have no diagram membership; deleting from schema is the only sensible cut
       get().deleteSubtype(selectedId)
     } else {
-      // Remove from diagram only; clipboard now holds a reference
+      // Remove from diagram only; element persists in schema (may become orphaned)
       get().removeElementFromDiagram(selectedId, activeDiagramId)
     }
   },
 
   // Ctrl+V: add original clipboard elements to the active diagram, skip those already present
   pasteClipboard() {
-    const { clipboard, activeDiagramId, diagrams } = get()
+    const { clipboard, activeDiagramId, diagrams, objectTypes, facts, constraints, subtypes } = get()
     if (!clipboard) return
 
     const activeDiagram = diagrams.find(d => d.id === activeDiagramId)
     const existingIds = new Set(
       activeDiagram?.elementIds === null
-        ? [...get().objectTypes.map(o => o.id), ...get().facts.map(f => f.id), ...get().constraints.map(c => c.id)]
+        ? [...objectTypes.map(o => o.id), ...facts.map(f => f.id), ...constraints.map(c => c.id)]
         : (activeDiagram?.elementIds ?? [])
     )
 
+    // Principle 3: ensure role-player OTs of clipboard facts are also added (even if
+    // they are in the schema but not in the clipboard itself)
+    const clipBaseIds = [
+      ...clipboard.objectTypes.map(o => o.id),
+      ...clipboard.facts.map(f => f.id),
+    ]
+    const closedIds = closeUnderPrinciple3(clipBaseIds, { facts, objectTypes })
+
     const toAdd = [
-      ...clipboard.objectTypes,
-      ...clipboard.facts,
-      ...clipboard.constraints,
-    ].filter(el => !existingIds.has(el.id))
+      ...[...closedIds]
+        .filter(id => !existingIds.has(id))
+        .map(id => objectTypes.find(o => o.id === id) ?? facts.find(f => f.id === id))
+        .filter(Boolean),
+      ...clipboard.constraints.filter(c => !existingIds.has(c.id)),
+    ]
 
     if (toAdd.length === 0) return
 
@@ -389,16 +400,23 @@ export const useOrmStore = create((set, get) => ({
           ?? (clipboard.facts.find(f => f.id === singleEl.id) ? 'fact' : 'constraint'))
       : null
 
-    set(s => ({
-      diagrams: s.diagrams.map(d => d.id !== activeDiagramId ? d : {
+    set(s => {
+      const updatedDiagrams = s.diagrams.map(d => d.id !== activeDiagramId ? d : {
         ...d,
         elementIds: d.elementIds === null ? null : [...d.elementIds, ...addIds],
-      }),
-      selectedId:       addIds.length === 1 ? addIds[0] : null,
-      selectedKind:     addIds.length === 1 ? singleKind : null,
-      multiSelectedIds: addIds.length  >  1 ? addIds : [],
-      isDirty: true,
-    }))
+        positions: {
+          ...d.positions,
+          ...Object.fromEntries(toAdd.map(el => [el.id, d.positions[el.id] ?? { x: el.x, y: el.y }])),
+        },
+      })
+      return {
+        diagrams: syncConstraints(updatedDiagrams, s.constraints, s.subtypes),
+        selectedId:       addIds.length === 1 ? addIds[0] : null,
+        selectedKind:     addIds.length === 1 ? singleKind : null,
+        multiSelectedIds: addIds.length  >  1 ? addIds : [],
+        isDirty: true,
+      }
+    })
   },
 
   // Ctrl+D: duplicate clipboard elements as fresh schema copies at +20px offset
@@ -535,7 +553,8 @@ export const useOrmStore = create((set, get) => ({
 
     let diagrams, activeDiagramId
     if (d.diagrams && d.diagrams.length > 0) {
-      diagrams        = d.diagrams
+      // Always start with empty selection; strip any persisted selection state
+      diagrams        = d.diagrams.map(diag => ({ ...diag, multiSelectedIds: [] }))
       activeDiagramId = d.activeDiagramId ?? d.diagrams[0].id
     } else {
       // Migrate: put all existing elements into a single default diagram
@@ -544,7 +563,7 @@ export const useOrmStore = create((set, get) => ({
       facts.forEach(f      => { positions[f.id]  = { x: f.x,  y: f.y  } })
       constraints.forEach(c => { positions[c.id] = { x: c.x,  y: c.y  } })
       const allIds = [...parsedOts.map(o => o.id), ...facts.map(f => f.id), ...constraints.map(c => c.id)]
-      const diag   = { id: uid(), name: 'Main', elementIds: allIds, positions }
+      const diag   = { id: uid(), name: 'Main', elementIds: allIds, positions, multiSelectedIds: [] }
       diagrams        = [diag]
       activeDiagramId = diag.id
     }
@@ -562,7 +581,9 @@ export const useOrmStore = create((set, get) => ({
 
   serialize() {
     const { objectTypes, facts, subtypes, constraints, diagrams, activeDiagramId } = get()
-    return JSON.stringify({ objectTypes, facts, subtypes, constraints, diagrams, activeDiagramId }, null, 2)
+    // Strip in-memory-only selection state before persisting
+    const cleanDiagrams = diagrams.map(({ multiSelectedIds: _, ...d }) => d)
+    return JSON.stringify({ objectTypes, facts, subtypes, constraints, diagrams: cleanDiagrams, activeDiagramId }, null, 2)
   },
 
   setFilePath(p) { set({ filePath: p }) },
@@ -1005,13 +1026,35 @@ export const useOrmStore = create((set, get) => ({
   },
 
   assignObjectTypeToRole(factId, roleIndex, objectTypeId) {
-    set(s => ({
-      facts: s.facts.map(f => {
+    set(s => {
+      const newFacts = s.facts.map(f => {
         if (f.id !== factId) return f
         return { ...f, roles: f.roles.map((r, i) => i === roleIndex ? { ...r, objectTypeId } : r) }
-      }),
-      isDirty: true,
-    }))
+      })
+
+      // Principle 3: add objectTypeId to every diagram that already contains factId
+      const ot = s.objectTypes.find(o => o.id === objectTypeId) ?? s.facts.find(f => f.id === objectTypeId)
+      const otPos = ot ? { x: ot.x, y: ot.y } : { x: 100, y: 100 }
+
+      const updatedDiagrams = s.diagrams.map(d => {
+        const factInDiagram = d.elementIds === null || d.elementIds.includes(factId)
+        if (!factInDiagram) return d
+        // show-all diagram already shows everything; no entry needed
+        if (d.elementIds === null) return d
+        if (d.elementIds.includes(objectTypeId)) return d
+        return {
+          ...d,
+          elementIds: [...d.elementIds, objectTypeId],
+          positions: { ...d.positions, [objectTypeId]: d.positions[objectTypeId] ?? otPos },
+        }
+      })
+
+      return {
+        facts:   newFacts,
+        diagrams: syncConstraints(updatedDiagrams, s.constraints, s.subtypes),
+        isDirty: true,
+      }
+    })
   },
 
   toggleUniqueness(factId, roleIndices) {
@@ -1022,8 +1065,25 @@ export const useOrmStore = create((set, get) => ({
         const exists = f.uniqueness.some(u => JSON.stringify([...u].sort()) === key)
         const uniqueness = exists
           ? f.uniqueness.filter(u => JSON.stringify([...u].sort()) !== key)
-          : [...f.uniqueness, roleIndices]
-        return { ...f, uniqueness }
+          : [...f.uniqueness, roleIndices].sort((a, b) => a.length - b.length)
+        const preferredUniqueness = exists && f.preferredUniqueness &&
+          JSON.stringify([...f.preferredUniqueness].sort()) === key
+          ? null : f.preferredUniqueness
+        return { ...f, uniqueness, preferredUniqueness }
+      }),
+      isDirty: true,
+    }))
+  },
+
+  setPreferredUniqueness(factId, roleIndices) {
+    const key = JSON.stringify([...roleIndices].sort())
+    set(s => ({
+      facts: s.facts.map(f => {
+        if (f.id !== factId) return f
+        const currentKey = f.preferredUniqueness
+          ? JSON.stringify([...f.preferredUniqueness].sort())
+          : null
+        return { ...f, preferredUniqueness: currentKey === key ? null : [...roleIndices] }
       }),
       isDirty: true,
     }))
@@ -1624,84 +1684,41 @@ export const useOrmStore = create((set, get) => ({
   deleteDiagram(id) {
     set(s => {
       if (s.diagrams.length <= 1) return {}  // can't delete the last diagram
-      const deleted    = s.diagrams.find(d => d.id === id)
       const newDiagrams = s.diagrams.filter(d => d.id !== id)
       const newActiveId = s.activeDiagramId === id ? newDiagrams[0]?.id : s.activeDiagramId
-
-      // Element IDs that were in the deleted diagram
-      const inDeleted = !deleted ? new Set()
-        : deleted.elementIds === null
-          ? new Set([...s.objectTypes.map(o => o.id), ...s.facts.map(f => f.id), ...s.constraints.map(c => c.id)])
-          : new Set(deleted.elementIds)
-
-      // Clipboard elements are exempt from deletion
-      const clipIds = new Set([
-        ...(s.clipboard?.objectTypes  ?? []).map(o => o.id),
-        ...(s.clipboard?.facts        ?? []).map(f => f.id),
-        ...(s.clipboard?.constraints  ?? []).map(c => c.id),
-      ])
-
-      const inAnyRemaining = (eid) =>
-        newDiagrams.some(d => d.elementIds === null || d.elementIds.includes(eid))
-
-      const shouldPurge = (eid) =>
-        inDeleted.has(eid) && !inAnyRemaining(eid) && !clipIds.has(eid)
-
-      const purgeOts   = new Set(s.objectTypes .filter(o => shouldPurge(o.id)).map(o => o.id))
-      const purgeFacts = new Set(s.facts        .filter(f => shouldPurge(f.id)).map(f => f.id))
-      const purgeCons  = new Set(s.constraints  .filter(c => shouldPurge(c.id)).map(c => c.id))
-      const purgeSts   = new Set(s.subtypes
-        .filter(st => purgeOts.has(st.subId) || purgeOts.has(st.superId)).map(st => st.id))
-
-      // Remove purged IDs from remaining diagrams' elementIds so syncConstraints sees clean state
-      const allPurge = new Set([...purgeOts, ...purgeFacts, ...purgeCons])
-      const cleanedDiagrams = newDiagrams.map(d => {
-        if (d.elementIds === null) return d
-        return {
-          ...d,
-          elementIds: d.elementIds.filter(eid => !allPurge.has(eid)),
-          positions:  Object.fromEntries(Object.entries(d.positions).filter(([k]) => !allPurge.has(k))),
-        }
-      })
-
-      const newOts   = s.objectTypes.filter(o => !purgeOts.has(o.id))
-      const newFacts = s.facts
-        .filter(f => !purgeFacts.has(f.id))
-        .map(f => ({ ...f, roles: f.roles.map(r => purgeOts.has(r.objectTypeId) ? { ...r, objectTypeId: null } : r) }))
-      const newSts   = s.subtypes.filter(st => !purgeSts.has(st.id))
-      const newCons  = s.constraints
-        .filter(c => !purgeCons.has(c.id))
-        .map(c => {
-          let out = c
-          if (out.roleSequences)
-            out = { ...out, roleSequences: out.roleSequences.map(g => g.filter(r => !purgeFacts.has(r.factId))) }
-          if (out.sequences)
-            out = { ...out, sequences: out.sequences.map(g => g.filter(m => !(m.kind === 'role' && purgeFacts.has(m.factId)))) }
-          if (out.targetObjectTypeId && purgeOts.has(out.targetObjectTypeId))
-            out = { ...out, targetObjectTypeId: null }
-          return out
-        })
-
-      // Re-sync constraints across remaining diagrams; then purge any that fell out of all diagrams
-      const syncedDiagrams = syncConstraints(cleanedDiagrams, newCons, newSts)
-      const finalCons = newCons.filter(c =>
-        clipIds.has(c.id) || syncedDiagrams.some(d => d.elementIds === null || d.elementIds.includes(c.id))
-      )
-
+      // Schema elements are never deleted when a diagram is removed —
+      // they persist as orphaned elements accessible via the schema browser.
       return {
-        diagrams:        syncedDiagrams,
+        diagrams:        newDiagrams,
         activeDiagramId: newActiveId,
-        objectTypes:     newOts,
-        facts:           newFacts,
-        subtypes:        newSts,
-        constraints:     finalCons,
         isDirty: true,
       }
     })
   },
 
   setActiveDiagram(id) {
-    set({ activeDiagramId: id })
+    const { activeDiagramId, multiSelectedIds, diagrams } = get()
+    if (id === activeDiagramId) return
+
+    // Save the current multi-selection into the outgoing diagram, then restore
+    // the incoming diagram's own selection (filtering out any stale IDs).
+    const savedDiagrams = diagrams.map(d =>
+      d.id === activeDiagramId ? { ...d, multiSelectedIds } : d
+    )
+    const incoming = savedDiagrams.find(d => d.id === id)
+    const restoredSelection = (incoming?.multiSelectedIds ?? []).filter(selId =>
+      incoming?.elementIds === null || (incoming?.elementIds ?? []).includes(selId)
+    )
+
+    set({
+      diagrams:        savedDiagrams,
+      activeDiagramId: id,
+      multiSelectedIds: restoredSelection,
+      selectedId:       null,
+      selectedKind:     null,
+      selectedRole:     null,
+      selectedUniqueness: null,
+    })
   },
 
   reorderDiagram(fromIndex, toIndex) {
@@ -1716,36 +1733,92 @@ export const useOrmStore = create((set, get) => ({
 
   addElementToDiagram(elementId, diagramId) {
     set(s => {
-      const el = s.objectTypes.find(o => o.id === elementId)
-        ?? s.facts.find(f => f.id === elementId)
-      const pos = el ? { x: el.x, y: el.y } : { x: 100, y: 100 }
+      // BFS to collect all OT/fact IDs that must accompany elementId in the diagram.
+      //
+      // • OT / fact   → add it; for facts also queue all role-player OTs (principle 3)
+      // • Subtype     → queue both endpoint OTs (subtype itself is implicit in diagrams)
+      // • Constraint  → queue all referenced facts + subtype endpoints;
+      //                 the constraint itself is added automatically by syncConstraints
+      const idsToAdd = new Set()
+      const visited  = new Set()
+      const queue    = [elementId]
 
-      // If adding a fact, collect its role players (OTs and objectified facts)
-      const fact = s.facts.find(f => f.id === elementId)
-      const linkedIds = fact
-        ? fact.roles.map(r => r.objectTypeId).filter(Boolean)
-        : []
+      while (queue.length > 0) {
+        const id = queue.shift()
+        if (visited.has(id)) continue
+        visited.add(id)
+
+        const st = s.subtypes.find(x => x.id === id)
+        if (st) {
+          if (!visited.has(st.subId))   queue.push(st.subId)
+          if (!visited.has(st.superId)) queue.push(st.superId)
+          continue
+        }
+
+        const con = s.constraints.find(x => x.id === id)
+        if (con) {
+          if (con.roleSequences)
+            for (const seq of con.roleSequences)
+              for (const ref of seq)
+                if (ref.factId && !visited.has(ref.factId)) queue.push(ref.factId)
+          if (con.sequences)
+            for (const seq of con.sequences)
+              for (const m of seq) {
+                if (m.kind === 'role'    && m.factId    && !visited.has(m.factId))    queue.push(m.factId)
+                if (m.kind === 'subtype' && m.subtypeId && !visited.has(m.subtypeId)) queue.push(m.subtypeId)
+              }
+          if (con.targetObjectTypeId && !visited.has(con.targetObjectTypeId))
+            queue.push(con.targetObjectTypeId)
+          continue  // constraint itself handled by syncConstraints below
+        }
+
+        // OT or fact
+        const el = s.objectTypes.find(o => o.id === id) ?? s.facts.find(f => f.id === id)
+        if (el) {
+          idsToAdd.add(id)
+          const fact = s.facts.find(f => f.id === id)
+          if (fact)
+            for (const r of fact.roles)
+              if (r.objectTypeId && !visited.has(r.objectTypeId)) queue.push(r.objectTypeId)
+        }
+      }
+
+      const targetDiagram = s.diagrams.find(d => d.id === diagramId)
+      const existingIds = new Set(targetDiagram?.elementIds ?? [])
 
       const updatedDiagrams = s.diagrams.map(d => {
         if (d.id !== diagramId) return d
-        if (d.elementIds !== null && d.elementIds.includes(elementId)) return d
 
-        let elementIds = d.elementIds === null ? null : [...d.elementIds, elementId]
-        let positions  = { ...d.positions, [elementId]: d.positions[elementId] ?? pos }
+        let elementIds = d.elementIds === null ? null : [...d.elementIds]
+        let positions  = { ...d.positions }
 
-        for (const rpId of linkedIds) {
-          if (elementIds !== null && elementIds.includes(rpId)) continue
-          const rp = s.objectTypes.find(o => o.id === rpId) ?? s.facts.find(f => f.id === rpId)
-          if (!rp) continue
-          if (elementIds !== null) elementIds = [...elementIds, rpId]
-          positions = { ...positions, [rpId]: positions[rpId] ?? { x: rp.x, y: rp.y } }
+        for (const id of idsToAdd) {
+          if (elementIds !== null && elementIds.includes(id)) continue
+          const el = s.objectTypes.find(o => o.id === id) ?? s.facts.find(f => f.id === id)
+          if (!el) continue
+          if (elementIds !== null) elementIds = [...elementIds, id]
+          positions = { ...positions, [id]: positions[id] ?? { x: el.x, y: el.y } }
         }
 
         return { ...d, elementIds, positions }
       })
 
+      // Select all newly added OT/fact IDs as multi-selection (including synced constraints)
+      const newlyAdded = [...idsToAdd].filter(id =>
+        targetDiagram?.elementIds === null ? false : !existingIds.has(id)
+      )
+      const syncedDiagrams = syncConstraints(updatedDiagrams, s.constraints, s.subtypes)
+      const syncedTarget = syncedDiagrams.find(d => d.id === diagramId)
+      const newConstraintIds = (syncedTarget?.elementIds ?? []).filter(id =>
+        !existingIds.has(id) && s.constraints.some(c => c.id === id)
+      )
+      const addedIds = newlyAdded.length > 0 ? newlyAdded : [...idsToAdd]
+      const multiSelectedIds = [...new Set([...addedIds, ...newConstraintIds])]
+
       return {
-        diagrams: syncConstraints(updatedDiagrams, s.constraints, s.subtypes),
+        diagrams: syncedDiagrams,
+        multiSelectedIds,
+        selectedId: null, selectedKind: null, selectedRole: null, selectedUniqueness: null,
         isDirty: true,
       }
     })
@@ -1771,9 +1844,8 @@ export const useOrmStore = create((set, get) => ({
       })
       const syncedDiagrams = syncConstraints(updatedDiagrams, s.constraints, s.subtypes)
       return {
-        diagrams:    syncedDiagrams,
-        constraints: purgeOrphanedConstraints(syncedDiagrams, s.constraints),
-        isDirty: true,
+        diagrams: syncedDiagrams,
+        isDirty:  true,
       }
     })
   },
@@ -1800,8 +1872,7 @@ export const useOrmStore = create((set, get) => ({
       })
       const syncedDiagrams = syncConstraints(updatedDiagrams, s.constraints, s.subtypes)
       return {
-        diagrams:    syncedDiagrams,
-        constraints: purgeOrphanedConstraints(syncedDiagrams, s.constraints),
+        diagrams: syncedDiagrams,
         multiSelectedIds: [],
         selectedId: null, selectedKind: null, selectedRole: null, selectedUniqueness: null,
         isDirty: true,
