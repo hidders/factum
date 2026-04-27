@@ -7,10 +7,8 @@ const ALL_INTERNAL_CONSTRAINT_TYPES = [
   { key: 'internalUniqueness', label: 'Internal Uniqueness', tool: 'addInternalUniqueness' },
   { key: 'mandatoryRole',      label: 'Mandatory Role', tool: 'toggleMandatory' },
   { key: 'internalFrequency',  label: 'Internal Frequency' },
-  { key: 'objectCardinality',  label: 'Object Cardinality' },
-  { key: 'roleCardinality',    label: 'Role Cardinality' },
-  { key: 'objectTypeValue',    label: 'Object Type Value' },
-  { key: 'roleValue',          label: 'Role Value' },
+  { key: 'cardinality',        label: 'Cardinality' },
+  { key: 'valueRange',         label: 'Value Range' },
 ]
 
 const BASIC_INTERNAL_CONSTRAINT_TYPES = ALL_INTERNAL_CONSTRAINT_TYPES.slice(0, 2)
@@ -340,67 +338,40 @@ function InternalFrequencyIcon() {
   )
 }
 
-function ObjectCardinalityIcon() {
-  const cx = 9, cy = 9, r = 7.2
+function CardinalityIcon() {
   return (
-    <svg width={18} height={18} style={{ display: 'block', flexShrink: 0 }}>
-      <rect x={1} y={3} width={16} height={12} rx={3}
-        fill="#fff" stroke={COL_CONSTRAINT} strokeWidth={1.5}/>
-      <text x={cx} y={cy} textAnchor="middle" dominantBaseline="central"
-        fontSize={7} fill={COL_CONSTRAINT} fontFamily="var(--font-mono)" fontWeight={600}>1..n</text>
+    <svg width={18} height={18} overflow="visible" style={{ display: 'block', flexShrink: 0 }}>
+      <text x={9} y={9} textAnchor="middle" dominantBaseline="central"
+        fontSize={8} fill={COL_CONSTRAINT} fontFamily="var(--font-mono)" fontWeight={600}>#≤3</text>
     </svg>
   )
 }
 
-function RoleCardinalityIcon() {
-  const x1 = 1, x2 = 9, x3 = 17, y1 = 5, y2 = 13
+function ValueRangeIcon() {
   return (
-    <svg width={18} height={18} style={{ display: 'block', flexShrink: 0 }}>
-      <rect x={x1} y={y1} width={x2-x1} height={y2-y1} fill="#fff" stroke={COL_CONSTRAINT} strokeWidth={1.2}/>
-      <rect x={x2} y={y1} width={x3-x2} height={y2-y1} fill="#fff" stroke={COL_CONSTRAINT} strokeWidth={1.2}/>
-      <text x={9} y={15.5} textAnchor="middle" dominantBaseline="middle"
-        fontSize={6.5} fill={COL_CONSTRAINT} fontFamily="var(--font-mono)" fontWeight={600}>1..n</text>
+    <svg width={18} height={18} overflow="visible" style={{ display: 'block', flexShrink: 0 }}>
+      <text x={9} y={9} textAnchor="middle" dominantBaseline="central"
+        fontSize={7} fill={COL_CONSTRAINT} fontFamily="var(--font-mono)" fontWeight={600}>{'{a..z}'}</text>
     </svg>
   )
 }
 
-function ObjectTypeValueIcon() {
-  return (
-    <svg width={18} height={18} style={{ display: 'block', flexShrink: 0 }}>
-      <rect x={1} y={3} width={16} height={12} rx={3}
-        fill="#fff" stroke={COL_CONSTRAINT} strokeWidth={1.5} strokeDasharray="3 2"/>
-      <text x={9} y={9.5} textAnchor="middle" dominantBaseline="central"
-        fontSize={7} fill={COL_CONSTRAINT} fontFamily="var(--font-mono)" fontWeight={600}>= v</text>
-    </svg>
-  )
-}
-
-function RoleValueIcon() {
-  const x1 = 1, x2 = 9, x3 = 17, y1 = 5, y2 = 13
-  return (
-    <svg width={18} height={18} style={{ display: 'block', flexShrink: 0 }}>
-      <rect x={x1} y={y1} width={x2-x1} height={y2-y1} fill="#fff" stroke={COL_CONSTRAINT} strokeWidth={1.2}/>
-      <rect x={x2} y={y1} width={x3-x2} height={y2-y1} fill="#fff" stroke={COL_CONSTRAINT} strokeWidth={1.2}/>
-      <text x={9} y={15.5} textAnchor="middle" dominantBaseline="middle"
-        fontSize={6.5} fill={COL_CONSTRAINT} fontFamily="var(--font-mono)" fontWeight={600}>= v</text>
-    </svg>
-  )
-}
+const GREYED_OUT_INTERNAL = new Set(['internalFrequency', 'cardinality'])
 
 function InternalConstraintBtn({ ct, active, onClick }) {
   const iconMap = {
     mandatoryRole:      <MandatoryRoleIcon />,
     internalUniqueness: <InternalUniquenessIcon />,
     internalFrequency:  <InternalFrequencyIcon />,
-    objectCardinality:  <ObjectCardinalityIcon />,
-    roleCardinality:    <RoleCardinalityIcon />,
-    objectTypeValue:    <ObjectTypeValueIcon />,
-    roleValue:          <RoleValueIcon />,
+    cardinality:        <CardinalityIcon />,
+    valueRange:         <ValueRangeIcon />,
   }
+  const greyed = GREYED_OUT_INTERNAL.has(ct.key)
   return (
     <button
       title={ct.label}
-      onClick={onClick}
+      onClick={greyed ? undefined : onClick}
+      disabled={greyed}
       style={{
         width: '100%',
         padding: '4px 10px',
@@ -410,16 +381,17 @@ function InternalConstraintBtn({ ct, active, onClick }) {
         alignItems: 'center',
         gap: 7,
         background: active ? 'var(--accent)' : 'transparent',
-        color: active ? '#fff' : 'var(--ink-2)',
+        color: greyed ? 'var(--ink-muted)' : active ? '#fff' : 'var(--ink-2)',
         border: `1px solid ${active ? 'var(--accent)' : 'transparent'}`,
         borderRadius: 4,
         fontFamily: 'var(--font-mono)',
-        cursor: 'pointer',
+        cursor: greyed ? 'default' : 'pointer',
         transition: 'all 0.12s',
         whiteSpace: 'nowrap',
+        opacity: greyed ? 0.5 : 1,
       }}
-      onMouseEnter={e => { if (!active) e.currentTarget.style.background = 'var(--bg-hover)' }}
-      onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent' }}
+      onMouseEnter={e => { if (!active && !greyed) e.currentTarget.style.background = 'var(--bg-hover)' }}
+      onMouseLeave={e => { if (!active && !greyed) e.currentTarget.style.background = 'transparent' }}
     >
       {iconMap[ct.key]}
       {ct.label}

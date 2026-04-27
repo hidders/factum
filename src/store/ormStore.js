@@ -53,12 +53,13 @@ const mkConstraint = (type, x, y) => ({
   // subtype-like constraints use sequences; others use roleSequences
   sequences:     EXTERNAL_CONSTRAINT_TYPES.has(type) ? [] : undefined,
   roleSequences: EXTERNAL_CONSTRAINT_TYPES.has(type) ? undefined : [[], []],
-  // inclusiveOr / exclusiveOr / uniqueness can optionally reference a target object type
-  targetObjectTypeId: (type === 'inclusiveOr' || type === 'exclusiveOr' || type === 'uniqueness') ? null : undefined,
+  // inclusiveOr / exclusiveOr / uniqueness / frequency / valueComparison can optionally reference a target object type
+  targetObjectTypeId: (type === 'inclusiveOr' || type === 'exclusiveOr' || type === 'uniqueness' || type === 'frequency' || type === 'valueComparison') ? null : undefined,
+  operator: type === 'valueComparison' ? '=' : undefined,
   // external uniqueness: preferred identifier flag
   isPreferredIdentifier: type === 'uniqueness' ? false : undefined,
   ringTypes: type === 'ring' ? [] : undefined,
-  frequency: { min: 1, max: 1 },
+  frequency: null,
   exhaustive: true,
   exclusive: false,
   subtypeIds: [],
@@ -545,6 +546,26 @@ export const useOrmStore = create((set, get) => ({
       if (out.constraintType === 'ring' && out.roleSequences && !out.sequences) {
         const { roleSequences, ...rest } = out
         out = { ...rest, sequences: roleSequences.map(g => g.map(r => ({ kind: 'role', ...r }))) }
+      }
+      // valueComparison roleSequences → sequences
+      if (out.constraintType === 'valueComparison' && out.roleSequences && !out.sequences) {
+        const { roleSequences, ...rest } = out
+        out = { ...rest, sequences: roleSequences.map(g => g.map(r => ({ kind: 'role', ...r }))) }
+      }
+      // frequency roleSequences → sequences (frequency now uses the external sequence mechanism)
+      if (out.constraintType === 'frequency' && out.roleSequences && !out.sequences) {
+        const { roleSequences, ...rest } = out
+        out = { ...rest, sequences: roleSequences.map(g => g.map(r => ({ kind: 'role', ...r }))) }
+      }
+      // frequency { min, max } → range-spec array
+      if (out.constraintType === 'frequency' && out.frequency && !Array.isArray(out.frequency)) {
+        const { min, max } = out.frequency
+        const spec = (max == null || max === Infinity)
+          ? (min <= 0 ? null : { type: 'lower', lower: String(min) })
+          : min === max
+            ? { type: 'single', value: String(min) }
+            : { type: 'range', lower: String(min), upper: String(max) }
+        out = { ...out, frequency: spec ? [spec] : null }
       }
       return out
     })
@@ -1201,10 +1222,10 @@ export const useOrmStore = create((set, get) => ({
     if (!c) return
     const sequences = c.sequences || []
     let steps
-    const isSingleton = c.constraintType === 'inclusiveOr' || c.constraintType === 'exclusiveOr' || c.constraintType === 'uniqueness'
+    const isSingleton = c.constraintType === 'inclusiveOr' || c.constraintType === 'exclusiveOr' || c.constraintType === 'uniqueness' || c.constraintType === 'frequency'
     const openEndedType = c.constraintType === 'equality' || c.constraintType === 'subset' ||
       c.constraintType === 'exclusion'
-    const maxSequences = (c.constraintType === 'equality' || c.constraintType === 'subset') ? 2
+    const maxSequences = (c.constraintType === 'equality' || c.constraintType === 'subset' || c.constraintType === 'valueComparison') ? 2
       : c.constraintType === 'ring' ? 1 : Infinity
     if (mode === 'newSequence') {
       if (sequences.length >= maxSequences) return

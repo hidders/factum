@@ -192,7 +192,7 @@ export function factBounds(fact) {
   }
 }
 
-export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleContextMenu, onBarContextMenu, isShared }) {
+export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleContextMenu, onBarContextMenu, onRoleValueClick, onNestedVrClick, isShared }) {
   const store = useOrmStore()
   const isSelected     = store.selectedId === fact.id || store.multiSelectedIds.includes(fact.id)
   const hasSelectedRole = store.selectedRole?.factId === fact.id
@@ -202,6 +202,7 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
   const isSubtypeTool     = store.tool === 'addSubtype'
   const isTargetTool      = store.tool === 'addTargetConnector' && store.linkDraft?.type === 'targetConnector'
   const isUniquenessTool  = store.tool === 'addInternalUniqueness'
+  const isRoleValueTool   = store.tool === 'addConstraint:valueRange'
   const isConnectorTool = isAssignTool || isSubtypeTool || store.tool === 'connectConstraint'
   const isDraftFrom       = store.linkDraft?.type === 'subtype' && store.linkDraft.fromId === fact.id
   const isAssigning    = store.linkDraft?.type === 'roleAssign'
@@ -266,8 +267,16 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
         store.setTool('select')
         return
       }
+      if (isRoleValueTool) {
+        const canHaveVr = fact.objectifiedKind === 'value'
+          || (fact.objectifiedKind !== 'value' && fact.objectifiedRefMode && fact.objectifiedRefMode !== 'none')
+        if (canHaveVr) { onNestedVrClick?.(e.clientX, e.clientY) }
+        else { store.setTool('select') }
+        return
+      }
     }
 
+    if (isRoleValueTool) { store.setTool('select'); return }
     if (isUniquenessTool) {
       store.setTool('select')
       store.startUniquenessConstruction(fact.id)
@@ -312,6 +321,7 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
     if (e.detail >= 2) return  // second click of a double-click: do nothing
     if (e.shiftKey) { store.shiftSelect(fact.id); return }
     if (store.sequenceConstruction) {
+      if (isVcConstruction && !vcEligibleRoles.has(roleIndex)) return
       store.collectSequenceMember({ kind: 'role', factId: fact.id, roleIndex })
       return
     }
@@ -351,6 +361,11 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
       const role = fact.roles[roleIndex]
       store.updateRole(fact.id, roleIndex, { mandatory: !role.mandatory })
       store.setTool('select')
+      return
+    }
+    if (isRoleValueTool) {
+      if (vrEligibleRoles.has(roleIndex)) onRoleValueClick?.(roleIndex, e.clientX, e.clientY)
+      else store.setTool('select')
       return
     }
     if (isAssignTool) {
@@ -424,12 +439,14 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
   }, [store, fact.id, isAssignTool, inConstruction, isSelected, onDragStart])
 
   // ── Annotation drag (value-range labels + reading text) ───────────────────
-  const vrDragRef      = useRef(null)
-  const readingDragRef = useRef(null)
-  const nameDragRef    = useRef(null)
-  const [vrLive,      setVrLive]      = useState(null) // { roleIndex, dx, dy } | null
-  const [readingLive, setReadingLive] = useState(null) // { dx, dy } | null
-  const [nameLive,    setNameLive]    = useState(null) // { dx, dy } | null
+  const vrDragRef       = useRef(null)
+  const nestedVrDragRef = useRef(null)
+  const readingDragRef  = useRef(null)
+  const nameDragRef     = useRef(null)
+  const [vrLive,       setVrLive]       = useState(null) // { roleIndex, dx, dy } | null
+  const [nestedVrLive, setNestedVrLive] = useState(null) // { dx, dy } | null
+  const [readingLive,  setReadingLive]  = useState(null) // { dx, dy } | null
+  const [nameLive,     setNameLive]     = useState(null) // { dx, dy } | null
   const [editingName,    setEditingName]    = useState(false)
   const [nameDraft,      setNameDraft]      = useState('')
   const nameInputRef = useRef(null)
@@ -445,6 +462,12 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
         const dx = d.origDx + (e.clientX - d.startX) / zoom
         const dy = d.origDy + (e.clientY - d.startY) / zoom
         setVrLive({ roleIndex: d.roleIndex, dx, dy })
+      }
+      const nvd = nestedVrDragRef.current
+      if (nvd) {
+        const dx = nvd.origDx + (e.clientX - nvd.startX) / zoom
+        const dy = nvd.origDy + (e.clientY - nvd.startY) / zoom
+        setNestedVrLive({ dx, dy })
       }
       const rd = readingDragRef.current
       if (rd) {
@@ -468,6 +491,14 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
         useOrmStore.getState().updateValueRangeOffset(fact.id, d.roleIndex, { dx, dy })
         vrDragRef.current = null
         setVrLive(null)
+      }
+      const nvd = nestedVrDragRef.current
+      if (nvd) {
+        const dx = nvd.origDx + (e.clientX - nvd.startX) / zoom
+        const dy = nvd.origDy + (e.clientY - nvd.startY) / zoom
+        useOrmStore.getState().updateFact(fact.id, { valueRangeOffset: { dx, dy } })
+        nestedVrDragRef.current = null
+        setNestedVrLive(null)
       }
       const rd = readingDragRef.current
       if (rd) {
@@ -551,7 +582,27 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
     :                                                  'var(--col-fact)'
   const roleStrokeW   = isFactSelected ? 2 : (isUniquenessTool || isNestedSubtypeCandidate || (isDraftFrom && fact.objectified)) ? 2 : 1.5
   const gc = store.sequenceConstruction
-  const isRoleCandidate = (isAssignTool && !isAssigning) || store.tool === 'toggleMandatory' || isUniquenessTool || !!gc
+  const gcConstraint = gc ? store.constraints.find(c => c.id === gc.constraintId) : null
+  const isVcConstruction = gcConstraint?.constraintType === 'valueComparison'
+
+  // Helper: is a role connected to a value type or entity with a reference mode?
+  const isVrEligibleRole = (role) => {
+    if (!role.objectTypeId) return false
+    const ot = store.objectTypes.find(o => o.id === role.objectTypeId)
+    if (!ot) return false
+    return ot.kind === 'value' || (ot.kind === 'entity' && ot.refMode && ot.refMode !== 'none')
+  }
+
+  const vcEligibleRoles = isVcConstruction ? new Set(
+    fact.roles.flatMap((role, ri) => isVrEligibleRole(role) ? [ri] : [])
+  ) : null
+
+  const isRoleCandidate = (isAssignTool && !isAssigning) || store.tool === 'toggleMandatory' || isUniquenessTool || (!!gc && !isVcConstruction)
+  // Roles eligible for a value range constraint: connected to a value type or entity with a reference mode
+  const vrEligibleRoles = isRoleValueTool ? new Set(
+    fact.roles.flatMap((role, ri) => isVrEligibleRole(role) ? [ri] : [])
+  ) : null
+  const roleIsCandidate = (ri) => isRoleCandidate || (isRoleValueTool && vrEligibleRoles.has(ri)) || (isVcConstruction && vcEligibleRoles.has(ri))
   const roleHighlight = isRoleCandidate ? 'var(--fill-candidate)' : '#ffffff'
 
   const isVertical = fact.orientation === 'vertical'
@@ -772,19 +823,31 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
     )}
     {/* ── Main fact-type group (role boxes + bars + reading) ───────────────── */}
     <g onMouseDown={handleMouseDown} onContextMenu={onContextMenu}
-       style={{ cursor: ((isSubtypeTool || isTargetTool) && fact.objectified) ? 'cell' : 'grab' }}
+       style={{ cursor: (() => {
+         if ((isSubtypeTool || isTargetTool) && fact.objectified) return 'cell'
+         if (isRoleValueTool && fact.objectified) {
+           const canHaveVr = fact.objectifiedKind === 'value'
+             || (fact.objectifiedKind !== 'value' && fact.objectifiedRefMode && fact.objectifiedRefMode !== 'none')
+           return canHaveVr ? 'pointer' : 'not-allowed'
+         }
+         return 'grab'
+       })() }}
        filter={isFactSelected || isDraftFrom ? 'url(#selectGlow)' : undefined}>
 
       {/* Objectified (nested) fact type — outer entity/value border + name */}
       {fact.objectified && (() => {
         const isSubtypeCandidate = (isSubtypeTool || isTargetTool) && !isDraftFrom
+        const canHaveVr = fact.objectifiedKind === 'value'
+          || (fact.objectifiedKind !== 'value' && fact.objectifiedRefMode && fact.objectifiedRefMode !== 'none')
+        const isNestedVrCandidate = isRoleValueTool && canHaveVr
         const nestedCol  = isDraftFrom        ? 'var(--col-subtype)'
           : isSubtypeCandidate                ? 'var(--col-candidate)'
+          : isNestedVrCandidate               ? 'var(--col-candidate)'
           : fact.objectifiedKind === 'value'  ? 'var(--col-value)'
           :                                     'var(--col-entity)'
         const nestedDash    = fact.objectifiedKind === 'value' ? '6 3' : 'none'
-        const nestedFill    = (isSubtypeCandidate || isDraftFrom) ? 'var(--fill-candidate)' : '#ffffff'
-        const nestedStrokeW = (isDraftFrom || isSubtypeCandidate) ? 2 : 1.5
+        const nestedFill    = (isSubtypeCandidate || isDraftFrom || isNestedVrCandidate) ? 'var(--fill-candidate)' : '#ffffff'
+        const nestedStrokeW = (isDraftFrom || isSubtypeCandidate || isNestedVrCandidate) ? 2 : 1.5
         const nestedRefText = (fact.objectifiedKind !== 'value' && store.showReferenceMode
           && fact.objectifiedRefMode && fact.objectifiedRefMode !== 'none')
           ? `(${fact.objectifiedRefMode})` : null
@@ -800,6 +863,53 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
         const readingExtra = fact.nestedReading
           ? NESTED_READING_GAP + NESTED_READING_LINE_H + NESTED_READING_PAD_BELOW
           : 0
+
+        // Value range annotation shared across both orientations
+        const nestedVrAnnotation = (() => {
+          if (!canHaveVr) return null
+          const vr = formatValueRange(fact.valueRange)
+          if (!vr) return null
+          const nb = nestedFactBounds(fact)
+          const nbCx = (nb.left + nb.right) / 2
+          const nbCy = (nb.top + nb.bottom) / 2
+          const nbHW = (nb.right - nb.left) / 2
+          const nbHH = (nb.bottom - nb.top) / 2
+          const defaultOff = { dx: 0, dy: nbHH + 14 }
+          const off = nestedVrLive ?? (fact.valueRangeOffset ?? defaultOff)
+          const tx = nbCx + off.dx
+          const ty = nbCy + off.dy
+          const dxL = tx - nbCx, dyL = ty - nbCy
+          const tBox = (dxL === 0 && dyL === 0) ? 0
+            : (Math.abs(dxL) * nbHH > Math.abs(dyL) * nbHW)
+              ? nbHW / Math.abs(dxL) : nbHH / Math.abs(dyL)
+          const connX = nbCx + dxL * tBox
+          const connY = nbCy + dyL * tBox
+          const halfW = measureVrText(vr) / 2 + VR_PAD_X
+          const halfH = VR_FONT_SIZE / 2 + VR_PAD_Y
+          const lineEnd = vrBoxEdge(tx, ty, halfW, halfH, connX, connY)
+          return (
+            <g key="nested-vr">
+              <line x1={connX} y1={connY} x2={lineEnd.x} y2={lineEnd.y}
+                stroke="var(--col-constraint)" strokeWidth={1.5}
+                strokeDasharray="5 3" style={{ pointerEvents: 'none' }}/>
+              <text x={tx} y={ty}
+                textAnchor="middle" dominantBaseline="middle"
+                fill="var(--col-constraint)" fontSize={VR_FONT_SIZE} fontFamily={VR_FONT}
+                style={{ cursor: nestedVrLive ? 'grabbing' : 'grab', userSelect: 'none' }}
+                onMouseDown={e => {
+                  e.stopPropagation()
+                  nestedVrDragRef.current = { startX: e.clientX, startY: e.clientY, origDx: off.dx, origDy: off.dy }
+                  setNestedVrLive({ dx: off.dx, dy: off.dy })
+                }}
+                onDoubleClick={e => {
+                  e.stopPropagation()
+                  onNestedVrClick?.(e.clientX, e.clientY)
+                }}>
+                {vr}
+              </text>
+            </g>
+          )
+        })()
 
         if (isVertical) {
           const padLeft   = barsBelow ? barPad : PAD
@@ -918,6 +1028,7 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
                   {readingText}
                 </text>
               )}
+              {nestedVrAnnotation}
             </>
           )
         }
@@ -1041,6 +1152,7 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
                 {readingText}
               </text>
             )}
+            {nestedVrAnnotation}
           </>
         )
       })()}
@@ -1067,18 +1179,18 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
                   fill={
                     roleFirstDraft && store.linkDraft.roleIndex === ri ? '#e8e0f8'
                     : inConstruction && ucRoles.includes(ri) ? '#dde8f5'
-                    : isRoleCandidate ? roleHighlight
+                    : roleIsCandidate(ri) ? 'var(--fill-candidate)'
                     : isNestedSubtypeCandidate ? 'var(--fill-candidate)'
                     : isRoleSelected(ri) ? '#dde8f5'
                     : highlightedRoles?.has(ri) ? '#fde3c8'
                     : '#ffffff'
                   }
-                  stroke={isRoleSelected(ri) ? 'var(--accent)' : isRoleCandidate ? 'var(--col-candidate)' : roleStroke}
-                  strokeWidth={isRoleSelected(ri) ? 2 : isRoleCandidate ? 2 : roleStrokeW}
+                  stroke={isRoleSelected(ri) ? 'var(--accent)' : roleIsCandidate(ri) ? 'var(--col-candidate)' : roleStroke}
+                  strokeWidth={isRoleSelected(ri) ? 2 : roleIsCandidate(ri) ? 2 : roleStrokeW}
                   onMouseDown={(e)   => handleRoleMouseDown(ri, e)}
                   onDoubleClick={(e) => handleRoleDoubleClick(ri, e)}
                   onContextMenu={(e) => handleRoleContextMenu(ri, e)}
-                  style={{ cursor: ((isSubtypeTool || isTargetTool) && fact.objectified) ? 'cell' : isAssignTool || inConstruction || !!store.sequenceConstruction || isRoleSelected(ri) ? 'crosshair' : 'pointer' }}
+                  style={{ cursor: ((isSubtypeTool || isTargetTool) && fact.objectified) ? 'cell' : isAssignTool || inConstruction || (!!store.sequenceConstruction && !isVcConstruction) || isRoleSelected(ri) ? 'crosshair' : (isRoleValueTool && !vrEligibleRoles.has(ri)) ? 'not-allowed' : (isVcConstruction && !vcEligibleRoles.has(ri)) ? 'not-allowed' : isVcConstruction ? 'crosshair' : 'pointer' }}
                 />
                 {isAssignTool && !role.objectTypeId && (
                   <text x={fact.x} y={ry + ROLE_W / 2}
@@ -1204,18 +1316,18 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
                   fill={
                     roleFirstDraft && store.linkDraft.roleIndex === ri ? '#e8e0f8'
                     : inConstruction && ucRoles.includes(ri) ? '#dde8f5'
-                    : isRoleCandidate ? roleHighlight
+                    : roleIsCandidate(ri) ? 'var(--fill-candidate)'
                     : isNestedSubtypeCandidate ? 'var(--fill-candidate)'
                     : isRoleSelected(ri) ? '#dde8f5'
                     : highlightedRoles?.has(ri) ? '#fde3c8'
                     : '#ffffff'
                   }
-                  stroke={isRoleSelected(ri) ? 'var(--accent)' : isRoleCandidate ? 'var(--col-candidate)' : roleStroke}
-                  strokeWidth={isRoleSelected(ri) ? 2 : isRoleCandidate ? 2 : roleStrokeW}
+                  stroke={isRoleSelected(ri) ? 'var(--accent)' : roleIsCandidate(ri) ? 'var(--col-candidate)' : roleStroke}
+                  strokeWidth={isRoleSelected(ri) ? 2 : roleIsCandidate(ri) ? 2 : roleStrokeW}
                   onMouseDown={(e)   => handleRoleMouseDown(ri, e)}
                   onDoubleClick={(e) => handleRoleDoubleClick(ri, e)}
                   onContextMenu={(e) => handleRoleContextMenu(ri, e)}
-                  style={{ cursor: ((isSubtypeTool || isTargetTool) && fact.objectified) ? 'cell' : isAssignTool || inConstruction || !!store.sequenceConstruction || isRoleSelected(ri) ? 'crosshair' : 'pointer' }}
+                  style={{ cursor: ((isSubtypeTool || isTargetTool) && fact.objectified) ? 'cell' : isAssignTool || inConstruction || (!!store.sequenceConstruction && !isVcConstruction) || isRoleSelected(ri) ? 'crosshair' : (isRoleValueTool && !vrEligibleRoles.has(ri)) ? 'not-allowed' : (isVcConstruction && !vcEligibleRoles.has(ri)) ? 'not-allowed' : isVcConstruction ? 'crosshair' : 'pointer' }}
                 />
                 {isAssignTool && !role.objectTypeId && (
                   <text x={rx + ROLE_W/2} y={fact.y}
@@ -1356,6 +1468,10 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
               vrDragRef.current = { roleIndex: ri, startX: e.clientX, startY: e.clientY,
                                     origDx: off.dx, origDy: off.dy }
               setVrLive({ roleIndex: ri, dx: off.dx, dy: off.dy })
+            }}
+            onDoubleClick={e => {
+              e.stopPropagation()
+              onRoleValueClick?.(ri, e.clientX, e.clientY)
             }}>
             {vr}
           </text>

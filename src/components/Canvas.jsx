@@ -10,10 +10,52 @@ import RoleConnectors, { MandatoryDots } from './RoleConnectors'
 import Minimap from './Minimap'
 import ContextMenu from './ContextMenu'
 import ConstraintMemberLabels from './ConstraintMemberLabels'
+import { ValueRangeEditor } from './Inspector'
 
 const SNAP = 10  // grid snap in world units
 
 function snap(v) { return Math.round(v / SNAP) * SNAP }
+
+// ── Value Range pop-up ────────────────────────────────────────────────────────
+function ValueRangePopup({ title, range, onChange, x, y, onClose }) {
+  const ref = useRef(null)
+
+  useEffect(() => {
+    const onDown = (e) => { if (!ref.current?.contains(e.target)) onClose() }
+    document.addEventListener('mousedown', onDown, true)
+    return () => document.removeEventListener('mousedown', onDown, true)
+  }, [onClose])
+
+  const POP_W = 280
+  const left = Math.max(8, Math.min(x - POP_W / 2, window.innerWidth - POP_W - 8))
+
+  return createPortal(
+    <div ref={ref}
+      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); onClose() } }}
+      style={{
+        position: 'fixed',
+        left,
+        bottom: window.innerHeight - y + 16,
+        width: POP_W,
+        background: 'var(--bg-surface)',
+        border: '1px solid var(--border)',
+        borderRadius: 6,
+        boxShadow: '0 4px 20px rgba(0,0,0,0.2)',
+        padding: '10px 12px',
+        zIndex: 10200,
+        fontFamily: 'var(--font-mono)',
+        fontSize: 12,
+        color: 'var(--ink-2)',
+      }}>
+      <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--ink-muted)',
+        textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
+        {title}
+      </div>
+      <ValueRangeEditor range={range} onChange={onChange}/>
+    </div>,
+    document.body
+  )
+}
 
 export default function Canvas() {
   const store = useOrmStore()
@@ -26,9 +68,25 @@ export default function Canvas() {
   const [snapEnabled, setSnapEnabled] = useState(true)
   const [spaceDown, setSpaceDown]     = useState(false)
   const spaceRef                      = useRef(false)   // always-current mirror for event handlers
-  const [contextMenu, setContextMenu] = useState(null)  // { x, y, items } | null
+  const [contextMenu, setContextMenu] = useState(null) // { x, y, items } | null
+  const [vrPopup, setVrPopup] = useState(null)         // { factId?, roleIndex?, otId?, x, y } | null
 
   const closeContextMenu = useCallback(() => setContextMenu(null), [])
+
+  const handleRoleValueClick = useCallback((fact, roleIndex, clientX, clientY) => {
+    store.setTool('select')
+    setVrPopup({ factId: fact.id, roleIndex, x: clientX, y: clientY })
+  }, [store])
+
+  const handleOtValueRangeClick = useCallback((ot, clientX, clientY) => {
+    store.setTool('select')
+    setVrPopup({ otId: ot.id, x: clientX, y: clientY })
+  }, [store])
+
+  const handleNestedFactVrClick = useCallback((fact, clientX, clientY) => {
+    store.setTool('select')
+    setVrPopup({ nestedFactId: fact.id, x: clientX, y: clientY })
+  }, [store])
 
 const handleMultiSelectionContextMenu = useCallback((e) => {
     e.preventDefault()
@@ -228,22 +286,24 @@ const handleMultiSelectionContextMenu = useCallback((e) => {
     e.preventDefault()
     e.stopPropagation()
     store.select(c.id, 'constraint')
-    const isSingleton = c.constraintType === 'inclusiveOr' || c.constraintType === 'exclusiveOr' || c.constraintType === 'uniqueness'
-    const maxSequences = (c.constraintType === 'equality' || c.constraintType === 'subset') ? 2 : Infinity
+    const isSingleton = c.constraintType === 'inclusiveOr' || c.constraintType === 'exclusiveOr' || c.constraintType === 'uniqueness' || c.constraintType === 'frequency'
+    const hasTargetOt = isSingleton || c.constraintType === 'valueComparison'
+    const noRolePosition = isSingleton || c.constraintType === 'valueComparison'
+    const maxSequences = (c.constraintType === 'equality' || c.constraintType === 'subset' || c.constraintType === 'valueComparison') ? 2 : Infinity
     const sequences = c.sequences || []
     const items = []
     if (c.sequences != null) {
       items.push({ label: 'Add role sequence',
         disabled: sequences.length >= maxSequences,
         action: () => store.startSequenceConstruction(c.id, 'newSequence') })
-      if (isSingleton) {
+      if (hasTargetOt) {
         items.push({ label: 'Set target object type',
           action: () => {
             store.setTool('addTargetConnector')
             store.setLinkDraft({ type: 'targetConnector', constraintId: c.id })
           } })
       }
-      if (sequences.length > 0 && !isSingleton) {
+      if (sequences.length > 0 && !noRolePosition) {
         items.push({ label: 'Add role position',
           action: () => store.startSequenceConstruction(c.id, 'extend') })
       }
@@ -266,7 +326,7 @@ const handleMultiSelectionContextMenu = useCallback((e) => {
             action: () => store.swapConstraintSequences(c.id) })
         }
         items.push('---')
-      } else {
+      } else if (c.constraintType !== 'frequency' && c.constraintType !== 'valueComparison') {
         const CHANGE_LABELS = {
           exclusiveOr: 'Exclusive Or',
           exclusion:   'Exclusion',
@@ -325,7 +385,7 @@ const handleMultiSelectionContextMenu = useCallback((e) => {
     if (store.tool === 'addFact2')      { store.addFact(x, y, 2); store.setTool('select'); return }
     if (store.tool === 'addNestedFact')      { store.addNestedFact(x, y, 2); store.setTool('select'); return }
     if (store.tool === 'addNestedValueFact') { store.addNestedValueFact(x, y, 2); store.setTool('select'); return }
-    if (store.tool.startsWith('addConstraint:')) {
+    if (store.tool.startsWith('addConstraint:') && store.tool !== 'addConstraint:valueRange') {
       store.addConstraint(store.tool.split(':')[1], x, y)
       store.setTool('select'); return
     }
@@ -337,7 +397,7 @@ const handleMultiSelectionContextMenu = useCallback((e) => {
       }
       return
     }
-    if (store.tool === 'assignRole' || store.tool === 'addSubtype' || store.tool === 'toggleMandatory' || store.tool === 'addInternalUniqueness') { store.setTool('select'); return }
+    if (store.tool === 'assignRole' || store.tool === 'addSubtype' || store.tool === 'toggleMandatory' || store.tool === 'addInternalUniqueness' || store.tool === 'addConstraint:valueRange') { store.setTool('select'); return }
     if (store.tool === 'connectConstraint') { store.clearSelection(); store.setTool('select'); return }
     if (store.tool === 'addTargetConnector') { store.clearLinkDraft(); store.setTool('select'); return }
     if (store.linkDraft) { store.clearLinkDraft(); return }
@@ -591,7 +651,9 @@ const handleMultiSelectionContextMenu = useCallback((e) => {
               isShared={sharedIds.has(f.id)}
               onContextMenu={(e) => handleFactContextMenu(f, e)}
               onRoleContextMenu={(roleIndex, e) => handleRoleContextMenu(f, roleIndex, e)}
-              onBarContextMenu={(ui, e) => handleUniquenessBarContextMenu(f, ui, e)}/>
+              onBarContextMenu={(ui, e) => handleUniquenessBarContextMenu(f, ui, e)}
+              onRoleValueClick={(roleIndex, cx, cy) => handleRoleValueClick(f, roleIndex, cx, cy)}
+              onNestedVrClick={(cx, cy) => handleNestedFactVrClick(f, cx, cy)}/>
           ))}
           <RoleConnectors mousePos={mousePos}/>
           {visibleOts.map(ot => (
@@ -599,7 +661,9 @@ const handleMultiSelectionContextMenu = useCallback((e) => {
               onDragStart={handleDragStart}
               mousePos={mousePos}
               isShared={sharedIds.has(ot.id)}
-              onContextMenu={(e) => handleOtContextMenu(ot, e)}/>
+              onContextMenu={(e) => handleOtContextMenu(ot, e)}
+              onDoubleClickValueRange={(cx, cy) => handleOtValueRangeClick(ot, cx, cy)}
+              onValueRangeClick={(cx, cy) => handleOtValueRangeClick(ot, cx, cy)}/>
           ))}
           <MandatoryDots/>
           <ConstraintNodes onDragStart={handleDragStart} mousePos={mousePos}
@@ -649,6 +713,28 @@ const handleMultiSelectionContextMenu = useCallback((e) => {
           onClose={closeContextMenu}/>,
         document.body
       )}
+
+      {vrPopup && (() => {
+        let title, range, onChange
+        if (vrPopup.factId != null) {
+          const fact = store.facts.find(f => f.id === vrPopup.factId)
+          range    = fact?.roles[vrPopup.roleIndex]?.valueRange
+          onChange = vr => store.updateRole(vrPopup.factId, vrPopup.roleIndex, { valueRange: vr })
+          title    = `Value Range — Role ${vrPopup.roleIndex + 1}`
+        } else if (vrPopup.nestedFactId != null) {
+          const fact = store.facts.find(f => f.id === vrPopup.nestedFactId)
+          range    = fact?.valueRange
+          onChange = vr => store.updateFact(vrPopup.nestedFactId, { valueRange: vr })
+          title    = `Value Range — ${fact?.objectifiedName || 'Nested Type'}`
+        } else {
+          const ot = store.objectTypes.find(o => o.id === vrPopup.otId)
+          range    = ot?.valueRange
+          onChange = vr => store.updateObjectType(vrPopup.otId, { valueRange: vr })
+          title    = `Value Range — ${ot?.name || 'Object Type'}`
+        }
+        return <ValueRangePopup title={title} range={range} onChange={onChange}
+          x={vrPopup.x} y={vrPopup.y} onClose={() => setVrPopup(null)}/>
+      })()}
 
       {/* Snap indicator */}
       <div style={{

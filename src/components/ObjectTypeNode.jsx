@@ -49,7 +49,7 @@ export function entityBounds(ot) {
            cx: ot.x, cy: ot.y }
 }
 
-export default function ObjectTypeNode({ objectType: ot, onDragStart, mousePos, onContextMenu, isShared }) {
+export default function ObjectTypeNode({ objectType: ot, onDragStart, mousePos, onContextMenu, onDoubleClickValueRange, onValueRangeClick, isShared }) {
   const store = useOrmStore()
   const isSelected    = store.selectedId === ot.id || store.multiSelectedIds.includes(ot.id)
   const isSubtypeTool      = store.tool === 'addSubtype'
@@ -181,6 +181,12 @@ export default function ObjectTypeNode({ objectType: ot, onDragStart, mousePos, 
 
     if (store.tool === 'connectConstraint') { store.clearSelection(); store.setTool('select'); return }
     if (store.tool === 'toggleMandatory' || store.tool === 'addInternalUniqueness') { store.setTool('select'); return }
+    if (store.tool === 'addConstraint:valueRange') {
+      const eligible = ot.kind === 'value' || (ot.kind === 'entity' && ot.refMode && ot.refMode !== 'none')
+      if (eligible) { onValueRangeClick?.(e.clientX, e.clientY) }
+      else { store.setTool('select') }
+      return
+    }
     if (store.tool === 'addTargetConnector') {
       const draft = store.linkDraft
       if (draft?.type === 'targetConnector' && draft?.constraintId) {
@@ -212,17 +218,20 @@ export default function ObjectTypeNode({ objectType: ot, onDragStart, mousePos, 
   }, [store, ot, onDragStart, isSubtypeTool, isAssignTool, editing, editingRef])
 
   const isSubtypeCandidate = isSubtypeTool && !isDraftFrom
+  const isVrTool      = store.tool === 'addConstraint:valueRange'
+  const isVrCandidate = isVrTool && (ot.kind === 'value' || (ot.kind === 'entity' && ot.refMode && ot.refMode !== 'none'))
 
   const stroke = isSelected          ? 'var(--accent)'
     : isDraftFrom                    ? 'var(--col-subtype)'
     : isSubtypeCandidate             ? 'var(--col-candidate)'
     : hasDraft                       ? 'var(--col-candidate)'
     : isTargetCandidate              ? 'var(--col-candidate)'
+    : isVrCandidate                  ? 'var(--col-candidate)'
     : ot.kind === 'entity'           ? 'var(--col-entity)'
     :                                  'var(--col-value)'
 
-  const strokeW = (isSelected || isDraftFrom) ? 2.5 : (isSubtypeCandidate || hasDraft || isTargetCandidate) ? 2 : 1.5
-  const fill    = (hasDraft || isSubtypeCandidate || isTargetCandidate) ? 'var(--fill-candidate)'
+  const strokeW = (isSelected || isDraftFrom) ? 2.5 : (isSubtypeCandidate || hasDraft || isTargetCandidate || isVrCandidate) ? 2 : 1.5
+  const fill    = (hasDraft || isSubtypeCandidate || isTargetCandidate || isVrCandidate) ? 'var(--fill-candidate)'
     :                                  '#ffffff'
 
   // Text vertical positions
@@ -236,7 +245,7 @@ export default function ObjectTypeNode({ objectType: ot, onDragStart, mousePos, 
       onMouseDown={handleMouseDown}
       onDoubleClick={handleDoubleClick}
       onContextMenu={onContextMenu}
-      style={{ cursor: isSubtypeTool || isAssignTool || isTargetCandidate ? 'cell' : editing ? 'text' : 'grab' }}
+      style={{ cursor: isSubtypeTool || isAssignTool || isTargetCandidate ? 'cell' : isVrCandidate ? 'pointer' : isVrTool ? 'not-allowed' : editing ? 'text' : 'grab' }}
       filter={isSelected || isDraftFrom || hasDraft ? 'url(#selectGlow)' : isShared ? 'url(#sharedGlow)' : undefined}
     >
       <rect x={ot.x - w/2} y={ot.y - h/2} width={w} height={h} rx={6}
@@ -325,6 +334,8 @@ export default function ObjectTypeNode({ objectType: ot, onDragStart, mousePos, 
       )}
 
       {(() => {
+        const canHaveVr = ot.kind === 'value' || (ot.kind === 'entity' && ot.refMode && ot.refMode !== 'none')
+        if (!canHaveVr) return null
         const vr = formatValueRange(ot.valueRange)
         if (!vr) return null
         const AUTO_DX = 0
@@ -332,18 +343,48 @@ export default function ObjectTypeNode({ objectType: ot, onDragStart, mousePos, 
         const off = vrLive ?? (ot.valueRangeOffset ?? { dx: AUTO_DX, dy: AUTO_DY })
         const tx = ot.x + off.dx
         const ty = ot.y + off.dy
+
+        // Border point on the OT box toward the label
+        const dxL = tx - ot.x, dyL = ty - ot.y
+        const lenL = Math.sqrt(dxL * dxL + dyL * dyL) || 1
+        const hw = w / 2, hh = h / 2
+        const tBox = (Math.abs(dxL) * hh > Math.abs(dyL) * hw)
+          ? hw / Math.abs(dxL) : hh / Math.abs(dyL)
+        const connX = ot.x + dxL * tBox
+        const connY = ot.y + dyL * tBox
+
+        // Border point on the label box toward the OT
+        const VR_PAD_X = 3, VR_PAD_Y = 3, VR_FONT_SIZE = 11
+        const halfW = measureText(vr, VR_FONT_SIZE) / 2 + VR_PAD_X
+        const halfH = VR_FONT_SIZE / 2 + VR_PAD_Y
+        const dxB = connX - tx, dyB = connY - ty
+        const lenB = Math.sqrt(dxB * dxB + dyB * dyB) || 1
+        const tLbl = (Math.abs(dxB) * halfH > Math.abs(dyB) * halfW)
+          ? halfW / Math.abs(dxB) : halfH / Math.abs(dyB)
+        const lineEndX = dxB === 0 && dyB === 0 ? tx : tx + dxB * tLbl
+        const lineEndY = dxB === 0 && dyB === 0 ? ty : ty + dyB * tLbl
+
         return (
-          <text x={tx} y={ty}
-            textAnchor="middle" dominantBaseline="middle"
-            fill="var(--col-constraint)" fontSize={11} fontFamily={OT_FONT}
-            style={{ cursor: vrLive ? 'grabbing' : 'grab', userSelect: 'none' }}
-            onMouseDown={e => {
-              e.stopPropagation()
-              vrDragRef.current = { startX: e.clientX, startY: e.clientY, origDx: off.dx, origDy: off.dy }
-              setVrLive({ dx: off.dx, dy: off.dy })
-            }}>
-            {vr}
-          </text>
+          <g>
+            <line x1={connX} y1={connY} x2={lineEndX} y2={lineEndY}
+              stroke="var(--col-constraint)" strokeWidth={1.5}
+              strokeDasharray="5 3" style={{ pointerEvents: 'none' }}/>
+            <text x={tx} y={ty}
+              textAnchor="middle" dominantBaseline="middle"
+              fill="var(--col-constraint)" fontSize={VR_FONT_SIZE} fontFamily={OT_FONT}
+              style={{ cursor: vrLive ? 'grabbing' : 'grab', userSelect: 'none' }}
+              onMouseDown={e => {
+                e.stopPropagation()
+                vrDragRef.current = { startX: e.clientX, startY: e.clientY, origDx: off.dx, origDy: off.dy }
+                setVrLive({ dx: off.dx, dy: off.dy })
+              }}
+              onDoubleClick={e => {
+                e.stopPropagation()
+                onDoubleClickValueRange?.(e.clientX, e.clientY)
+              }}>
+              {vr}
+            </text>
+          </g>
         )
       })()}
     </g>

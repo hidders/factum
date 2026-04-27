@@ -241,7 +241,7 @@ const VR_TYPES = [
   { value: 'range',  label: 'Range' },
 ]
 
-function ValueRangeEditor({ range, onChange }) {
+export function ValueRangeEditor({ range, onChange, naturalNumbers = false }) {
   const specs = range || []
 
   const commit = (newSpecs) => onChange(newSpecs.length ? newSpecs : null)
@@ -268,6 +268,7 @@ function ValueRangeEditor({ range, onChange }) {
 
   const inputStyle = { fontSize: 11, padding: '2px 4px', flex: 1, minWidth: 0 }
   const sepStyle = { fontSize: 11, color: 'var(--ink-muted)', flexShrink: 0, padding: '0 2px' }
+  const numProps = naturalNumbers ? { type: 'number', min: 0, step: 1 } : {}
 
   return (
     <div>
@@ -279,12 +280,12 @@ function ValueRangeEditor({ range, onChange }) {
           </select>
 
           {spec.type === 'single' && (
-            <input value={spec.value ?? ''} placeholder="value"
+            <input {...numProps} value={spec.value ?? ''} placeholder="value"
               onChange={e => updateSpec(i, { value: e.target.value })}
               style={inputStyle}/>
           )}
           {(spec.type === 'lower' || spec.type === 'range') && (
-            <input value={spec.lower ?? ''} placeholder="lower"
+            <input {...numProps} value={spec.lower ?? ''} placeholder="lower"
               onChange={e => updateSpec(i, { lower: e.target.value })}
               style={inputStyle}/>
           )}
@@ -292,7 +293,7 @@ function ValueRangeEditor({ range, onChange }) {
             <span style={sepStyle}>..</span>
           )}
           {(spec.type === 'upper' || spec.type === 'range') && (
-            <input value={spec.upper ?? ''} placeholder="upper"
+            <input {...numProps} value={spec.upper ?? ''} placeholder="upper"
               onChange={e => updateSpec(i, { upper: e.target.value })}
               style={inputStyle}/>
           )}
@@ -330,13 +331,15 @@ function ObjectTypeInspector({ ot }) {
             onChange={v => store.updateObjectType(ot.id, { refMode: v })}/>
         </Row>
       )}
-      <Row>
-        <Label>Value Range</Label>
-        <ValueRangeEditor
-          range={ot.valueRange}
-          onChange={vr => store.updateObjectType(ot.id, { valueRange: vr })}
-        />
-      </Row>
+      {(ot.kind === 'value' || (ot.kind === 'entity' && ot.refMode && ot.refMode !== 'none')) && (
+        <Row>
+          <Label>Value Range</Label>
+          <ValueRangeEditor
+            range={ot.valueRange}
+            onChange={vr => store.updateObjectType(ot.id, { valueRange: vr })}
+          />
+        </Row>
+      )}
       <DiagramList elementId={ot.id} kind={ot.kind} />
       <DangerBtn onClick={() => store.deleteObjectType(ot.id)}>
         Delete {ot.kind === 'entity' ? 'Entity' : 'Value'} Type
@@ -697,6 +700,16 @@ function FactInspector({ fact }) {
               onChange={v => store.updateFact(fact.id, { objectifiedRefMode: v })}/>
           </Row>
         )}
+        {/* Value Range — nested value types and nested entity types with reference mode */}
+        {fact.objectified && (fact.objectifiedKind === 'value' || (fact.objectifiedKind !== 'value' && fact.objectifiedRefMode && fact.objectifiedRefMode !== 'none')) && (
+          <Row>
+            <Label>Value Range</Label>
+            <ValueRangeEditor
+              range={fact.valueRange}
+              onChange={vr => store.updateFact(fact.id, { valueRange: vr })}
+            />
+          </Row>
+        )}
         {fact.objectified && (
           <Row>
             <Checkbox
@@ -977,6 +990,8 @@ const EXTERNAL_CONSTRAINT_TITLES = {
   uniqueness:  'External Uniqueness Constraint',
   equality:    'Equality Constraint',
   subset:      'Subset Constraint',
+  frequency:       'External Frequency Constraint',
+  valueComparison: 'Value Comparison Constraint',
 }
 
 // ── Subtype-like Constraint inspector ─────────────────────────────────────────
@@ -1105,8 +1120,20 @@ function ExternalConstraintInspector({ c }) {
         </Row>
       )}
 
-      {/* Target Object Type — only for inclusiveOr / exclusiveOr / uniqueness */}
-      {(c.constraintType === 'inclusiveOr' || c.constraintType === 'exclusiveOr' || c.constraintType === 'uniqueness') && (
+      {/* Frequency range — only for frequency */}
+      {c.constraintType === 'frequency' && (
+        <Row>
+          <Label>Frequency Range</Label>
+          <ValueRangeEditor
+            range={c.frequency}
+            onChange={vr => store.updateConstraint(c.id, { frequency: vr })}
+            naturalNumbers
+          />
+        </Row>
+      )}
+
+      {/* Target Object Type — only for inclusiveOr / exclusiveOr / uniqueness / frequency / valueComparison */}
+      {(c.constraintType === 'inclusiveOr' || c.constraintType === 'exclusiveOr' || c.constraintType === 'uniqueness' || c.constraintType === 'frequency' || c.constraintType === 'valueComparison') && (
         <Row>
           <Label>Target Object Type</Label>
           <select
@@ -1120,6 +1147,23 @@ function ExternalConstraintInspector({ c }) {
             <option value="">— none —</option>
             {store.objectTypes.slice().sort((a, b) => a.name.localeCompare(b.name)).map(ot => (
               <option key={ot.id} value={ot.id}>{ot.name}</option>
+            ))}
+          </select>
+        </Row>
+      )}
+
+      {/* Operator — only for valueComparison */}
+      {c.constraintType === 'valueComparison' && (
+        <Row>
+          <Label>Operator</Label>
+          <select
+            value={c.operator ?? '='}
+            onChange={e => store.updateConstraint(c.id, { operator: e.target.value })}
+            style={{ width: '100%', fontSize: 12, padding: '3px 5px',
+              background: 'var(--bg-raised)', border: '1px solid var(--border-soft)',
+              borderRadius: 4, color: 'var(--ink-2)' }}>
+            {['=', '≠', '<', '≤', '>', '≥'].map(op => (
+              <option key={op} value={op}>{op}</option>
             ))}
           </select>
         </Row>
@@ -1497,7 +1541,7 @@ export default function Inspector() {
         ? <RoleInspector fact={roleFact} roleIndex={selectedRole.roleIndex} />
         : fact && <FactInspector fact={fact} />}
       {st   && <SubtypeInspector st={st} />}
-      {con  && (con.constraintType === 'ring' || con.constraintType === 'exclusiveOr' || con.constraintType === 'exclusion' || con.constraintType === 'inclusiveOr' || con.constraintType === 'uniqueness' || con.constraintType === 'equality' || con.constraintType === 'subset')
+      {con  && (con.constraintType === 'ring' || con.constraintType === 'exclusiveOr' || con.constraintType === 'exclusion' || con.constraintType === 'inclusiveOr' || con.constraintType === 'uniqueness' || con.constraintType === 'equality' || con.constraintType === 'subset' || con.constraintType === 'frequency' || con.constraintType === 'valueComparison')
              ? <ExternalConstraintInspector c={con} />
              : con && <ConstraintInspector c={con} />}
 

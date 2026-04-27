@@ -1,13 +1,41 @@
 import React, { useCallback, useRef } from 'react'
 import { useOrmStore } from '../store/ormStore'
 import { useDiagramElements } from '../hooks/useDiagramElements'
-import { roleCenter, nestedFactBounds } from './FactTypeNode'
+import { roleCenter, nestedFactBounds, ROLE_H } from './FactTypeNode'
 import { roleAnchor } from './RoleConnectors'
-import { entityBounds } from './ObjectTypeNode'
+import { entityBounds, formatValueRange } from './ObjectTypeNode'
 import { EXTERNAL_CONSTRAINT_TYPES } from '../constants.js'
 
 const CONSTRAINT_R = 14        // radius of standard constraint circle
 const EXTERNAL_CONSTRAINT_R = 8 // radius of external constraint circle (2× mandatory dot)
+
+const FREQ_FONT_SIZE = 9
+const FREQ_PAD_X     = 6   // horizontal padding inside stadium, each side
+
+let _freqCanvas = null
+function measureFreqText(text) {
+  if (!_freqCanvas) _freqCanvas = document.createElement('canvas')
+  const ctx = _freqCanvas.getContext('2d')
+  ctx.font = `${FREQ_FONT_SIZE}px monospace`
+  return ctx.measureText(text).width
+}
+
+function formatFrequencyRange(frequency) {
+  if (!frequency || frequency.length === 0) return null
+  if (frequency.length === 1) {
+    const s = frequency[0]
+    if (s.type === 'lower' && (s.lower ?? '') !== '') return `\u2265${s.lower}`
+    if (s.type === 'upper' && (s.upper ?? '') !== '') return `\u2264${s.upper}`
+  }
+  const full = formatValueRange(frequency)
+  return full ? full.slice(1, -1) : null
+}
+
+function freqStadiumW(label) {
+  const minW = EXTERNAL_CONSTRAINT_R * 2   // never narrower than a circle
+  if (!label) return minW
+  return Math.max(minW, measureFreqText(label) + FREQ_PAD_X * 2)
+}
 
 const CONSTRAINT_SYMBOL = {
   equality:   '=',
@@ -571,6 +599,7 @@ const CONSTRAINT_COLOR = {
   subset:           'var(--col-excl)',
   ring:             'var(--col-ring)',
   frequency:        'var(--col-freq)',
+  valueComparison:  'var(--col-constraint)',
 }
 
 const HIGHLIGHT_ARC_COLOR = '#e67e22'   // orange — used when table row/col/cell is pressed
@@ -609,6 +638,32 @@ export default function ConstraintNodes({ onDragStart, mousePos, onContextMenu }
     const ids = members.map(getId)
     if (ids.some(id => !id)) return false
     return ids.every(id => id === ids[0])
+  }
+
+  // If two consecutive roles in the same fact, returns the point on the shared edge
+  // (top/bottom for horizontal facts, left/right for vertical) closest to (cx, cy); else null.
+  function consecutiveRoleMidpoint(factId0, ri0, factId1, ri1, cx, cy) {
+    if (factId0 !== factId1) return null
+    if (Math.abs(ri0 - ri1) !== 1) return null
+    const fact = factMap[factId0]
+    if (!fact) return null
+    const rc0 = roleCenter(fact, ri0)
+    const rc1 = roleCenter(fact, ri1)
+    const midX = (rc0.x + rc1.x) / 2
+    const midY = (rc0.y + rc1.y) / 2
+    if (fact.orientation === 'vertical') {
+      // Shared horizontal edge — pick left or right endpoint
+      const lx = fact.x - ROLE_H / 2, rx = fact.x + ROLE_H / 2
+      return (lx - cx) ** 2 < (rx - cx) ** 2
+        ? { x: lx, y: midY }
+        : { x: rx, y: midY }
+    } else {
+      // Shared vertical edge — pick top or bottom endpoint
+      const ty = fact.y - ROLE_H / 2, by = fact.y + ROLE_H / 2
+      return (ty - cy) ** 2 < (by - cy) ** 2
+        ? { x: midX, y: ty }
+        : { x: midX, y: by }
+    }
   }
 
   // Geometry helper: line from constraint centre to a member (role or subtype midpoint)
@@ -651,7 +706,7 @@ export default function ConstraintNodes({ onDragStart, mousePos, onContextMenu }
   const isConnectTool      = store.tool === 'connectConstraint'
   const isTargetTool       = store.tool === 'addTargetConnector'
   const targetDraftActive  = isTargetTool && store.linkDraft?.type === 'targetConnector'
-  const TARGET_TYPES       = new Set(['inclusiveOr', 'exclusiveOr', 'uniqueness'])
+  const TARGET_TYPES       = new Set(['inclusiveOr', 'exclusiveOr', 'uniqueness', 'frequency', 'valueComparison'])
 
   return (
     <g>
@@ -674,16 +729,47 @@ export default function ConstraintNodes({ onDragStart, mousePos, onContextMenu }
         }
 
         const arcs = EXTERNAL_CONSTRAINT_TYPES.has(c.constraintType)
-          ? (c.sequences || []).flatMap((seq, gi) =>
-              seq.map((member, mi) => {
+          ? (c.sequences || []).flatMap((seq, gi) => {
+              // Two consecutive roles in the same fact → single arc to the midpoint
+              if (seq.length === 2 && seq[0].kind === 'role' && seq[1].kind === 'role') {
+                const mid = consecutiveRoleMidpoint(seq[0].factId, seq[0].roleIndex, seq[1].factId, seq[1].roleIndex, c.x, c.y)
+                if (mid) {
+                  const lit = isArcHighlighted(gi, 0) || isArcHighlighted(gi, 1)
+                  const markerEnd = c.constraintType === 'subset' && gi === 1 ? 'url(#arrowSubsetSolid)' : undefined
+                  const sw = lit ? 2.2 : 1.2, op = lit ? 1 : 0.75
+                  const dx = mid.x - c.x, dy = mid.y - c.y
+                  const len = Math.sqrt(dx * dx + dy * dy) || 1
+                  return [<line key={`${c.id}-g${gi}-mid`}
+                    x1={c.x + dx / len * r0} y1={c.y + dy / len * r0}
+                    x2={mid.x} y2={mid.y}
+                    stroke={lit ? HIGHLIGHT_ARC_COLOR : color}
+                    strokeWidth={sw} strokeDasharray="4 2" opacity={op}
+                    markerEnd={markerEnd}/>]
+                }
+              }
+              return seq.map((member, mi) => {
                 const lit = isArcHighlighted(gi, mi)
                 const markerEnd = c.constraintType === 'subset' && gi === 1 ? 'url(#arrowSubsetSolid)' : undefined
                 return memberArcLine(member, `${c.id}-g${gi}-m${mi}`, c.x, c.y, r0,
                   lit ? HIGHLIGHT_ARC_COLOR : color, lit, markerEnd)
               }).filter(Boolean)
-            )
-          : (c.roleSequences || []).flatMap((seq, gi) =>
-              seq.map((ref, ri) => {
+            })
+          : (c.roleSequences || []).flatMap((seq, gi) => {
+              // Two consecutive roles in the same fact → single arc to the midpoint
+              if (seq.length === 2) {
+                const mid = consecutiveRoleMidpoint(seq[0].factId, seq[0].roleIndex, seq[1].factId, seq[1].roleIndex, c.x, c.y)
+                if (mid) {
+                  const dx = mid.x - c.x, dy = mid.y - c.y
+                  const len = Math.sqrt(dx * dx + dy * dy) || 1
+                  return [<line key={`${c.id}-g${gi}-mid`}
+                    x1={c.x + dx / len * r0} y1={c.y + dy / len * r0}
+                    x2={mid.x} y2={mid.y}
+                    stroke={color} strokeWidth={1.2}
+                    strokeDasharray={gi === 1 ? '4 2' : 'none'} opacity={0.75}
+                    markerEnd={c.constraintType === 'subset' && gi === 0 ? 'url(#arrowSubset)' : undefined}/>]
+                }
+              }
+              return seq.map((ref, ri) => {
                 const fact = factMap[ref.factId]
                 if (!fact) return null
                 const rc = roleCenter(fact, ref.roleIndex)
@@ -699,7 +785,7 @@ export default function ConstraintNodes({ onDragStart, mousePos, onContextMenu }
                     markerEnd={c.constraintType === 'subset' && gi === 0 ? 'url(#arrowSubset)' : undefined}/>
                 )
               }).filter(Boolean)
-            )
+            })
 
         // Arcs for members already collected in the current sequence construction session
         const gc = store.sequenceConstruction?.constraintId === c.id ? store.sequenceConstruction : null
@@ -716,6 +802,7 @@ export default function ConstraintNodes({ onDragStart, mousePos, onContextMenu }
             onMouseDown={(e) => {
               e.stopPropagation()
               if (e.button !== 0 || e.detail >= 2) return  // skip second click of double-click
+              if (store.tool === 'addConstraint:valueRange') { store.setTool('select'); return }
               if (isConnectTool) {
                 store.select(c.id, 'constraint')
                 store.startSequenceConstruction(c.id, 'newSequence')
@@ -813,8 +900,8 @@ export default function ConstraintNodes({ onDragStart, mousePos, onContextMenu }
               )
             })()}
 
-            {/* Constraint circle — omitted for ring with exactly 1 property or a special combined symbol */}
-            {!(c.constraintType === 'ring' && (() => {
+            {/* Constraint circle — omitted for ring with exactly 1 property / combined symbol, and for frequency (uses stadium) */}
+            {c.constraintType !== 'frequency' && !(c.constraintType === 'ring' && (() => {
               const rt = c.ringTypes || []
               return rt.length === 1 ||
                 (rt.length === 3 && rt.includes('reflexive') && rt.includes('antisymmetric') && rt.includes('transitive')) ||
@@ -863,8 +950,8 @@ export default function ConstraintNodes({ onDragStart, mousePos, onContextMenu }
               </text>
             )}
 
-            {/* Subtype-like constraints — graphical symbols */}
-            {EXTERNAL_CONSTRAINT_TYPES.has(c.constraintType) && (() => {
+            {/* Subtype-like constraints — graphical symbols (not frequency, which uses a stadium) */}
+            {EXTERNAL_CONSTRAINT_TYPES.has(c.constraintType) && c.constraintType !== 'frequency' && (() => {
               const d = EXTERNAL_CONSTRAINT_R * 0.707
               return (
                 <g style={{ pointerEvents: 'none' }}>
@@ -890,6 +977,21 @@ export default function ConstraintNodes({ onDragStart, mousePos, onContextMenu }
                       {c.constraintType === 'equality' ? '=' : '⊆'}
                     </text>
                   )}
+                  {/* Symbol + dots — Value Comparison */}
+                  {c.constraintType === 'valueComparison' && (
+                    <>
+                      <circle cx={c.x - EXTERNAL_CONSTRAINT_R} cy={c.y} r={2}
+                        fill={isCandidate ? 'var(--col-candidate)' : color}/>
+                      <circle cx={c.x + EXTERNAL_CONSTRAINT_R} cy={c.y} r={2}
+                        fill={isCandidate ? 'var(--col-candidate)' : color}/>
+                      <text x={c.x} y={c.y} textAnchor="middle" dominantBaseline="central"
+                        fontSize={11} fill={isCandidate ? 'var(--col-candidate)' : color}
+                        fontFamily="var(--font-mono)" fontWeight={600}
+                        style={{ pointerEvents: 'none' }}>
+                        {c.operator ?? '='}
+                      </text>
+                    </>
+                  )}
                   {/* Horizontal diameter line(s) — External Uniqueness */}
                   {c.constraintType === 'uniqueness' && (c.isPreferredIdentifier ? (
                     <>
@@ -906,17 +1008,35 @@ export default function ConstraintNodes({ onDragStart, mousePos, onContextMenu }
               )
             })()}
 
-            {/* Frequency label */}
-            {c.constraintType === 'frequency' && (
-              <text x={c.x} y={c.y + CONSTRAINT_R + 12}
-                textAnchor="middle"
-                fontSize={9} fill={color}
-                fontFamily="var(--font-mono)"
-                style={{ pointerEvents: 'none' }}
-              >
-                {c.frequency.min}..{c.frequency.max ?? '∞'}
-              </text>
-            )}
+            {/* Frequency stadium — rounded rect sized to fit the range label */}
+            {c.constraintType === 'frequency' && (() => {
+              const lbl = formatFrequencyRange(c.frequency) ?? ''
+              const sw  = freqStadiumW(lbl)
+              const sh  = EXTERNAL_CONSTRAINT_R   // half-height
+              const strokeColor = isCandidate ? 'var(--col-candidate)' : color
+              return (
+                <g>
+                  <rect
+                    x={c.x - sw / 2} y={c.y - sh}
+                    width={sw} height={sh * 2}
+                    rx={sh}
+                    fill={isCandidate ? 'var(--fill-candidate)' : '#ffffff'}
+                    stroke={strokeColor}
+                    strokeWidth={isSelected ? 2 : isCandidate ? 2 : 1.5}
+                  />
+                  {lbl && (
+                    <text x={c.x} y={c.y}
+                      textAnchor="middle" dominantBaseline="central"
+                      fontSize={FREQ_FONT_SIZE} fill={strokeColor}
+                      fontFamily="var(--font-mono)"
+                      style={{ pointerEvents: 'none' }}
+                    >
+                      {lbl}
+                    </text>
+                  )}
+                </g>
+              )
+            })()}
 
             {/* Ring type icons — ORM2 graphical symbols for each active property */}
             {c.constraintType === 'ring' && (() => {
