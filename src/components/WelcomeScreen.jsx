@@ -120,7 +120,7 @@ export default function WelcomeScreen() {
           <div style={{ fontFamily: 'var(--font-display)', fontSize: 26, fontWeight: 600,
             color: 'var(--col-entity)', letterSpacing: '0.01em', fontStyle: 'italic',
             marginBottom: 5 }}>
-            Factum
+            FreeFBM
           </div>
           <div style={{ fontSize: 12, color: 'var(--ink-muted)', lineHeight: 1.6 }}>
             Object-Role Modelling 2 — fact-oriented conceptual data modelling

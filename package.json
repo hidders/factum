@@ -1,7 +1,7 @@
 {
-  "name": "factum",
+  "name": "freefbm",
   "version": "1.0.0",
-  "description": "Factum — ORM2 Conceptual Modelling Editor",
+  "description": "FreeFBM — ORM2 Conceptual Modelling Editor",
   "main": "electron/main.cjs",
   "author": {
     "name": "Jan Hidders",
@@ -9,10 +9,10 @@
     "url": "https://github.com/hidders"
   },
   "license": "MIT",
-  "homepage": "https://github.com/hidders/factum",
+  "homepage": "https://github.com/hidders/freefbm",
   "repository": {
     "type": "git",
-    "url": "https://github.com/hidders/factum.git"
+    "url": "https://github.com/hidders/freefbm.git"
   },
   "scripts": {
     "dev":         "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
@@ -38,8 +38,8 @@
     "wait-on": "^7.2.0"
   },
   "build": {
-    "appId": "com.hidders.factum",
-    "productName": "Factum",
+    "appId": "com.hidders.freefbm",
+    "productName": "FreeFBM",
     "copyright": "Copyright © 2026 hidders",
     "directories": {
       "output": "release",
@@ -59,8 +59,8 @@
       "icon": "build/icon.icns"
     },
     "dmg": {
-      "title": "Factum ${version}",
-      "artifactName": "Factum-${version}-mac-${arch}.${ext}"
+      "title": "FreeFBM ${version}",
+      "artifactName": "FreeFBM-${version}-mac-${arch}.${ext}"
     },
     "win": {
       "target": [
@@ -73,7 +73,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "artifactName": "Factum-${version}-windows-setup.${ext}"
+      "artifactName": "FreeFBM-${version}-windows-setup.${ext}"
     },
     "linux": {
       "target": [
@@ -82,7 +82,7 @@
       ],
       "icon": "build/icon.png",
       "category": "Utility",
-      "artifactName": "Factum-${version}-linux-${arch}.${ext}"
+      "artifactName": "FreeFBM-${version}-linux-${arch}.${ext}"
     },
     "deb": {
       "depends": ["libgtk-3-0", "libnotify4", "libnss3", "libxss1", "libxtst6", "xdg-utils", "libatspi2.0-0", "libuuid1"]
@@ -90,7 +90,7 @@
     "publish": {
       "provider": "github",
       "owner": "hidders",
-      "repo": "factum"
+      "repo": "freefbm"
     }
   }
 }

@@ -1204,11 +1204,13 @@ export const useOrmStore = create((set, get) => ({
     const isSingleton = c.constraintType === 'inclusiveOr' || c.constraintType === 'exclusiveOr' || c.constraintType === 'uniqueness'
     const openEndedType = c.constraintType === 'equality' || c.constraintType === 'subset' ||
       c.constraintType === 'exclusion'
-    const maxSequences = (c.constraintType === 'equality' || c.constraintType === 'subset' || c.constraintType === 'ring') ? 2 : Infinity
+    const maxSequences = (c.constraintType === 'equality' || c.constraintType === 'subset') ? 2
+      : c.constraintType === 'ring' ? 1 : Infinity
     if (mode === 'newSequence') {
       if (sequences.length >= maxSequences) return
       const newSequenceIdx = sequences.length
-      const size = isSingleton ? 1 : (sequences.length > 0 ? sequences[0].length : 1)
+      const size = c.constraintType === 'ring' ? 2
+        : isSingleton ? 1 : (sequences.length > 0 ? sequences[0].length : 1)
       steps = Array.from({ length: size }, () => ({ sequenceIndex: newSequenceIdx }))
     } else {
       // extend: one pick per sequence

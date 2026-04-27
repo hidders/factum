@@ -83,7 +83,7 @@ jobs:
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: factum-${{ matrix.label }}
+          name: freefbm-${{ matrix.label }}
           path: |
             release/*.dmg
             release/*.zip
@@ -103,7 +103,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          pattern: factum-*
+          pattern: freefbm-*
           merge-multiple: true
 
       - name: List downloaded artifacts
@@ -112,7 +112,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: Factum ${{ github.ref_name }}
+          name: FreeFBM ${{ github.ref_name }}
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true

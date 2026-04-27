@@ -1,21 +1,21 @@
-# Factum
+# FreeFBM
 
 > An Electron application by [hidders](https://github.com/hidders)
 
-[![Build and Release](https://github.com/hidders/factum/actions/workflows/build.yml/badge.svg)](https://github.com/hidders/factum/actions/workflows/build.yml)
+[![Build and Release](https://github.com/hidders/freefbm/actions/workflows/build.yml/badge.svg)](https://github.com/hidders/freefbm/actions/workflows/build.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ---
 
 ## Download
 
-Pre-built installers for all platforms are available on the [Releases](https://github.com/hidders/factum/releases) page.
+Pre-built installers for all platforms are available on the [Releases](https://github.com/hidders/freefbm/releases) page.
 
 | Platform | File |
 |----------|------|
-| macOS (Apple Silicon & Intel) | `Factum-x.x.x-mac-*.dmg` |
-| Windows | `Factum-x.x.x-windows-setup.exe` |
-| Linux | `Factum-x.x.x-linux-x64.AppImage` or `.deb` |
+| macOS (Apple Silicon & Intel) | `FreeFBM-x.x.x-mac-*.dmg` |
+| Windows | `FreeFBM-x.x.x-windows-setup.exe` |
+| Linux | `FreeFBM-x.x.x-linux-x64.AppImage` or `.deb` |
 
 ---
 

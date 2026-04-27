@@ -78,7 +78,7 @@ export default function Toolbar() {
         marginRight: 8, letterSpacing: '0.02em',
         WebkitAppRegion: 'drag', userSelect: 'none',
         WebkitTextStroke: '1px #7c4dbd', WebkitTextFillColor: 'black' }}>
-        Factum
+        FreeFBM
       </span>
 
       <Divider/>

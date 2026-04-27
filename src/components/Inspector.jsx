@@ -1330,12 +1330,12 @@ function ExternalConstraintInspector({ c }) {
       {/* Action buttons */}
       {!gc && (
         <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
-          {!(c.constraintType === 'ring' && sequences.length >= 2) && (
+          {!(c.constraintType === 'ring' && sequences.length >= 1) && (
             <button onClick={() => store.startSequenceConstruction(c.id, 'newSequence')} style={btnStyle}>
               + Add sequence
             </button>
           )}
-          {sequences.length > 0 && c.constraintType !== 'inclusiveOr' && c.constraintType !== 'exclusiveOr' && (
+          {sequences.length > 0 && c.constraintType !== 'inclusiveOr' && c.constraintType !== 'exclusiveOr' && c.constraintType !== 'ring' && (
             <button onClick={() => store.startSequenceConstruction(c.id, 'extend')} style={btnStyle}>
               + Add position
             </button>
