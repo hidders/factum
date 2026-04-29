@@ -100,16 +100,30 @@ function Label({ children }) {
 function Section({ title, children }) {
   return (
     <div style={{ marginBottom: 18 }}>
-      <div style={{ fontSize: 10, color: 'var(--accent)', fontWeight: 700,
-        letterSpacing: '0.1em', textTransform: 'uppercase',
-        borderBottom: '1px solid var(--border-soft)', paddingBottom: 5, marginBottom: 10 }}>
+      {title && (
+        <div style={{ fontSize: 10, color: 'var(--accent)', fontWeight: 700,
+          letterSpacing: '0.1em', textTransform: 'uppercase',
+          borderBottom: '1px solid var(--border-soft)', paddingBottom: 5, marginBottom: 10 }}>
+          {title}
+        </div>
+      )}
+      {children}
+    </div>
+  )
+}
+function Row({ children }) { return <div style={{ marginBottom: 8 }}>{children}</div> }
+function Subsection({ title, children }) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ fontSize: 10, color: 'var(--ink-3)', fontWeight: 700,
+        letterSpacing: '0.08em', textTransform: 'uppercase',
+        borderBottom: '1px solid var(--border-soft)', paddingBottom: 4, marginBottom: 8 }}>
         {title}
       </div>
       {children}
     </div>
   )
 }
-function Row({ children }) { return <div style={{ marginBottom: 8 }}>{children}</div> }
 
 // ── Diagrams-containing list ─────────────────────────────────────────────────
 // Shows which diagrams contain the given element, in tab order.
@@ -332,24 +346,31 @@ function ObjectTypeInspector({ ot }) {
             onChange={v => store.updateObjectType(ot.id, { refMode: v })}/>
         </Row>
       )}
-      {(ot.kind === 'value' || (ot.kind === 'entity' && ot.refMode && ot.refMode !== 'none')) && (
+
+      <Subsection title="Constraints">
+        {(ot.kind === 'value' || (ot.kind === 'entity' && ot.refMode && ot.refMode !== 'none')) && (
+          <Row>
+            <Label>Value Range</Label>
+            <ValueRangeEditor
+              range={ot.valueRange}
+              onChange={vr => store.updateObjectType(ot.id, { valueRange: vr })}
+            />
+          </Row>
+        )}
         <Row>
-          <Label>Value Range</Label>
+          <Label>Cardinality Range</Label>
           <ValueRangeEditor
-            range={ot.valueRange}
-            onChange={vr => store.updateObjectType(ot.id, { valueRange: vr })}
+            naturalNumbers
+            range={ot.cardinalityRange}
+            onChange={vr => store.updateObjectType(ot.id, { cardinalityRange: vr })}
           />
         </Row>
-      )}
-      <Row>
-        <Label>Cardinality Range</Label>
-        <ValueRangeEditor
-          naturalNumbers
-          range={ot.cardinalityRange}
-          onChange={vr => store.updateObjectType(ot.id, { cardinalityRange: vr })}
-        />
-      </Row>
-      <DiagramList elementId={ot.id} kind={ot.kind} />
+      </Subsection>
+
+      <Subsection title="Usage">
+        <DiagramList elementId={ot.id} kind={ot.kind} />
+      </Subsection>
+
       <DangerBtn onClick={() => store.deleteObjectType(ot.id)}>
         Delete {ot.kind === 'entity' ? 'Entity' : 'Value'} Type
       </DangerBtn>
@@ -357,6 +378,27 @@ function ObjectTypeInspector({ ot }) {
   )
 }
 
+
+// ── Shared role constraints section (used in RoleList and RoleInspector) ─────
+function RoleConstraintsSection({ role, onChange }) {
+  return (
+    <Subsection title="Constraints">
+      <Label>Participation</Label>
+      <Checkbox label="Mandatory" checked={role.mandatory}
+        onChange={v => onChange({ mandatory: v })} />
+      <Row>
+        <Label>Value Range</Label>
+        <ValueRangeEditor range={role.valueRange}
+          onChange={vr => onChange({ valueRange: vr })} />
+      </Row>
+      <Row>
+        <Label>Cardinality Range</Label>
+        <ValueRangeEditor naturalNumbers range={role.cardinalityRange}
+          onChange={vr => onChange({ cardinalityRange: vr })} />
+      </Row>
+    </Subsection>
+  )
+}
 
 // ── Draggable role list ───────────────────────────────────────────────────────
 function RoleList({ fact, store }) {
@@ -454,23 +496,10 @@ function RoleList({ fact, store }) {
               <TInput value={role.roleName} placeholder="optional"
                 onChange={v => store.updateRole(fact.id, ri, { roleName: v })}/>
             </Row>
-            <Checkbox label="Mandatory" checked={role.mandatory}
-              onChange={v => store.updateRole(fact.id, ri, { mandatory: v })}/>
-            <Row>
-              <Label>Value Range</Label>
-              <ValueRangeEditor
-                range={role.valueRange}
-                onChange={vr => store.updateRole(fact.id, ri, { valueRange: vr })}
-              />
-            </Row>
-            <Row>
-              <Label>Cardinality Range</Label>
-              <ValueRangeEditor
-                naturalNumbers
-                range={role.cardinalityRange}
-                onChange={vr => store.updateRole(fact.id, ri, { cardinalityRange: vr })}
-              />
-            </Row>
+            <RoleConstraintsSection
+              role={role}
+              onChange={patch => store.updateRole(fact.id, ri, patch)}
+            />
           </div>
         )
       })}
@@ -602,23 +631,10 @@ function RoleInspector({ fact, roleIndex }) {
         <TInput value={role.roleName} placeholder="optional"
           onChange={v => store.updateRole(fact.id, roleIndex, { roleName: v })}/>
       </Row>
-      <Checkbox label="Mandatory" checked={role.mandatory}
-        onChange={v => store.updateRole(fact.id, roleIndex, { mandatory: v })}/>
-      <Row>
-        <Label>Value Range</Label>
-        <ValueRangeEditor
-          range={role.valueRange}
-          onChange={vr => store.updateRole(fact.id, roleIndex, { valueRange: vr })}
-        />
-      </Row>
-      <Row>
-        <Label>Cardinality Range</Label>
-        <ValueRangeEditor
-          naturalNumbers
-          range={role.cardinalityRange}
-          onChange={vr => store.updateRole(fact.id, roleIndex, { cardinalityRange: vr })}
-        />
-      </Row>
+      <RoleConstraintsSection
+        role={role}
+        onChange={patch => store.updateRole(fact.id, roleIndex, patch)}
+      />
     </Section>
   )
 }
@@ -711,6 +727,167 @@ function ReadingEditor({ fact, store, parts, roleOrder, onUpdatePart }) {
   )
 }
 
+// ── Fact presentation subsection ─────────────────────────────────────────────
+function FactPresentationSubsection({ fact, store }) {
+  return (
+    <Subsection title="Presentation">
+      {fact.arity === 2 && (
+        <Row>
+          <Label>Reading display</Label>
+          {[
+            { value: 'forward', label: 'Forward only' },
+            { value: 'both',    label: 'Forward / Reverse' },
+            { value: 'reverse', label: '◂  Reverse only' },
+          ].map(opt => (
+            <label key={opt.value} style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              fontSize: 12, color: 'var(--ink-2)', cursor: 'pointer', marginBottom: 3,
+            }}>
+              <input type="radio"
+                name={`rdisplay-${fact.id}`}
+                value={opt.value}
+                checked={(fact.readingDisplay || 'forward') === opt.value}
+                onChange={() => store.updateFact(fact.id, { readingDisplay: opt.value })}
+                style={{ width: 'auto', padding: 0, border: 'none', accentColor: 'var(--accent)' }}
+              />
+              {opt.label}
+            </label>
+          ))}
+        </Row>
+      )}
+      <Row>
+        <Label>Spatial Ordering</Label>
+        {fact.objectified && (
+          <Checkbox
+            label="Nested Reading"
+            checked={!!fact.nestedReading}
+            disabled={fact.orientation === 'vertical'}
+            onChange={v => {
+              const patch = { nestedReading: v }
+              if (!v && fact.readingAbove) { patch.readingAbove = false; patch.readingOffset = null }
+              store.updateFact(fact.id, patch)
+            }}
+          />
+        )}
+        <Checkbox
+          label="Vertical"
+          checked={fact.orientation === 'vertical'}
+          onChange={v => {
+            const patch = { orientation: v ? 'vertical' : 'horizontal', readingOffset: null }
+            if (v && fact.nestedReading) patch.nestedReading = false
+            store.updateFact(fact.id, patch)
+          }}
+        />
+      </Row>
+      <Row>
+        <Checkbox
+          label={fact.orientation === 'vertical' ? 'Reading right' : 'Reading above'}
+          checked={!!fact.readingAbove}
+          disabled={fact.objectified && fact.orientation !== 'vertical' && !fact.nestedReading}
+          onChange={v => store.updateFact(fact.id, { readingAbove: v, readingOffset: null })}
+        />
+        <Checkbox
+          label="Uniqueness below"
+          checked={!!fact.uniquenessBelow}
+          onChange={v => store.updateFactLayout(fact.id, { uniquenessBelow: v })}
+        />
+      </Row>
+    </Subsection>
+  )
+}
+
+// ── Fact constraints subsection ───────────────────────────────────────────────
+function FactConstraintsSubsection({ fact, store }) {
+  return (
+    <Subsection title="Constraints">
+      <Label>Uniqueness</Label>
+      {fact.uniqueness.length === 0 && (
+        <div style={{ color: 'var(--ink-muted)', fontSize: 11, marginBottom: 8 }}>None defined</div>
+      )}
+      {fact.uniqueness.map((u, ui) => {
+        const isPreferred = fact.preferredUniqueness != null &&
+          JSON.stringify([...fact.preferredUniqueness].sort()) === JSON.stringify([...u].sort())
+        return (
+          <div key={ui} style={{ display: 'flex', justifyContent: 'space-between',
+            alignItems: 'center', marginBottom: 4, fontSize: 12 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
+              <input type="radio" name={`pref-${fact.id}`} checked={isPreferred}
+                onChange={() => {}}
+                onClick={() => store.setPreferredUniqueness(fact.id, u)}
+                style={{ cursor: 'pointer', accentColor: 'var(--col-mandatory)' }}/>
+              <span>Roles: {u.map(i => i + 1).join(', ')}</span>
+            </label>
+            <button onClick={() => store.toggleUniqueness(fact.id, u)}
+              style={{ background: 'none', color: '#c0392b', border: 'none',
+                cursor: 'pointer', fontSize: 12 }}>✕</button>
+          </div>
+        )
+      })}
+      {fact.arity > 1 && (
+        <button onClick={() => store.startUniquenessConstruction(fact.id)}
+          style={{ marginTop: 2, marginBottom: 10, padding: '4px 10px', fontSize: 11,
+            background: 'var(--bg-raised)', border: '1px solid var(--border)',
+            borderRadius: 3, color: 'var(--ink-2)', cursor: 'pointer' }}>
+          + Uniqueness Constraint
+        </button>
+      )}
+
+      {fact.objectified && fact.objectifiedKind === 'value' && (
+        <Row>
+          <Label>Value Range</Label>
+          <ValueRangeEditor
+            range={fact.valueRange}
+            onChange={vr => store.updateFact(fact.id, { valueRange: vr })}
+          />
+        </Row>
+      )}
+
+      {fact.objectified && (
+        <Row>
+          <Label>Cardinality Range</Label>
+          <ValueRangeEditor
+            naturalNumbers
+            range={fact.cardinalityRange}
+            onChange={vr => store.updateFact(fact.id, { cardinalityRange: vr })}
+          />
+        </Row>
+      )}
+
+      <Label>Frequency</Label>
+      {(fact.internalFrequency || []).length === 0 && (
+        <div style={{ color: 'var(--ink-muted)', fontSize: 11, marginBottom: 8 }}>None defined</div>
+      )}
+      {(fact.internalFrequency || []).map((ifItem) => (
+        <div key={ifItem.id} style={{ marginBottom: 8, paddingBottom: 8,
+          borderBottom: '1px solid var(--border-soft)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between',
+            alignItems: 'center', marginBottom: 4 }}>
+            <span style={{ fontSize: 12, color: 'var(--ink-2)' }}>
+              Roles: {[...ifItem.roles].sort((a, b) => a - b).map(i => i + 1).join(', ')}
+            </span>
+            <button onClick={() => store.removeInternalFrequency(fact.id, ifItem.id)}
+              style={{ background: 'none', color: '#c0392b', border: 'none',
+                cursor: 'pointer', fontSize: 12 }}>✕</button>
+          </div>
+          <ValueRangeEditor
+            positiveIntegers
+            range={ifItem.range}
+            onChange={vr => store.updateInternalFrequency(fact.id, ifItem.id, { range: vr })}
+          />
+        </div>
+      ))}
+      {fact.arity > 1 && (
+        <button onClick={() => store.startFrequencyConstruction(fact.id)}
+          style={{ marginTop: 2, marginBottom: 10, padding: '4px 10px', fontSize: 11,
+            background: 'var(--bg-raised)', border: '1px solid var(--border)',
+            borderRadius: 3, color: 'var(--ink-2)', cursor: 'pointer' }}>
+          + Frequency Constraint
+        </button>
+      )}
+    </Subsection>
+  )
+}
+
 // ── Fact type inspector ───────────────────────────────────────────────────────
 function FactInspector({ fact }) {
   const store = useOrmStore()
@@ -718,7 +895,7 @@ function FactInspector({ fact }) {
 
   // Shared: arity + readings + display options
   const factTypeSection = (
-    <Section title={`Fact Type (${fact.arity}-ary)`}>
+    <Section title={fact.objectified ? undefined : `Fact Type (${fact.arity}-ary)`}>
       {/* Arity control */}
       <Row>
         <Label>Arity</Label>
@@ -842,62 +1019,23 @@ function FactInspector({ fact }) {
         )
       })()}
 
-      {/* Reading display mode — binary facts only */}
-      {fact.arity === 2 && (
-        <Row>
-          <Label>Reading display</Label>
-          {[
-            { value: 'forward', label: 'Forward only' },
-            { value: 'both',    label: 'Forward / Reverse' },
-            { value: 'reverse', label: '◂  Reverse only' },
-          ].map(opt => (
-            <label key={opt.value} style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              fontSize: 12, color: 'var(--ink-2)', cursor: 'pointer', marginBottom: 3,
-            }}>
-              <input type="radio"
-                name={`rdisplay-${fact.id}`}
-                value={opt.value}
-                checked={(fact.readingDisplay || 'forward') === opt.value}
-                onChange={() => store.updateFact(fact.id, { readingDisplay: opt.value })}
-                style={{ width: 'auto', padding: 0, border: 'none', accentColor: 'var(--accent)' }}
-              />
-              {opt.label}
-            </label>
-          ))}
-        </Row>
-      )}
-
-      {/* Orientation */}
+      {/* Roles */}
       <Row>
-        <Checkbox
-          label="Show vertically"
-          checked={fact.orientation === 'vertical'}
-          onChange={v => {
-            const patch = { orientation: v ? 'vertical' : 'horizontal', readingOffset: null }
-            if (v && fact.nestedReading) patch.nestedReading = false
-            store.updateFact(fact.id, patch)
-          }}
-        />
+        <Label>Roles</Label>
+        <CompactRoleList fact={fact} store={store} />
       </Row>
 
-      {/* Reading position */}
-      <Row>
-        <Checkbox
-          label={fact.orientation === 'vertical' ? 'Reading is shown right' : 'Reading is shown above'}
-          checked={!!fact.readingAbove}
-          disabled={fact.objectified && fact.orientation !== 'vertical' && !fact.nestedReading}
-          onChange={v => store.updateFact(fact.id, { readingAbove: v, readingOffset: null })}
-        />
-      </Row>
+      <FactPresentationSubsection fact={fact} store={store} />
+      <FactConstraintsSubsection fact={fact} store={store} />
 
-      {/* For regular facts: Appears in + Delete here */}
-      {!fact.objectified && (
-        <>
-          <DiagramList elementId={fact.id} kind="fact" />
-          <DangerBtn onClick={() => store.deleteFact(fact.id)}>Delete Fact Type</DangerBtn>
-        </>
-      )}
+      <Subsection title="Usage">
+        <DiagramList elementId={fact.id} kind="fact" />
+      </Subsection>
+      <DangerBtn onClick={() => store.deleteFact(fact.id)}>
+        {fact.objectified
+          ? (fact.objectifiedKind === 'value' ? 'Delete Nested Value Type' : 'Delete Nested Entity Type')
+          : 'Delete Fact Type'}
+      </DangerBtn>
     </Section>
   )
 
@@ -919,7 +1057,7 @@ function FactInspector({ fact }) {
                   onChange={v => store.updateFact(fact.id, { objectifiedRefMode: v })}/>
               </Row>
             )}
-            {(fact.objectifiedKind === 'value' || (fact.objectifiedKind !== 'value' && fact.objectifiedRefMode && fact.objectifiedRefMode !== 'none')) && (
+            {fact.objectifiedKind !== 'value' && fact.objectifiedRefMode && fact.objectifiedRefMode !== 'none' && (
               <Row>
                 <Label>Value Range</Label>
                 <ValueRangeEditor
@@ -928,26 +1066,6 @@ function FactInspector({ fact }) {
                 />
               </Row>
             )}
-            <Row>
-              <Label>Cardinality Range</Label>
-              <ValueRangeEditor
-                naturalNumbers
-                range={fact.cardinalityRange}
-                onChange={vr => store.updateFact(fact.id, { cardinalityRange: vr })}
-              />
-            </Row>
-            <Row>
-              <Checkbox
-                label="Nested Reading"
-                checked={!!fact.nestedReading}
-                disabled={fact.orientation === 'vertical'}
-                onChange={v => {
-                  const patch = { nestedReading: v }
-                  if (!v && fact.readingAbove) { patch.readingAbove = false; patch.readingOffset = null }
-                  store.updateFact(fact.id, patch)
-                }}
-              />
-            </Row>
           </Section>
 
           {/* Fact-type structure */}
@@ -955,85 +1073,6 @@ function FactInspector({ fact }) {
         </>
       ) : factTypeSection}
 
-      <Section title="Roles">
-        <CompactRoleList fact={fact} store={store} />
-      </Section>
-
-      <Section title="Uniqueness Constraints">
-        {fact.uniqueness.length === 0 && (
-          <div style={{ color: 'var(--ink-muted)', fontSize: 11, marginBottom: 8 }}>None defined</div>
-        )}
-        {fact.uniqueness.map((u, ui) => {
-          const isPreferred = fact.preferredUniqueness != null &&
-            JSON.stringify([...fact.preferredUniqueness].sort()) === JSON.stringify([...u].sort())
-          return (
-            <div key={ui} style={{ display: 'flex', justifyContent: 'space-between',
-              alignItems: 'center', marginBottom: 4, fontSize: 12 }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
-                <input type="radio" name={`pref-${fact.id}`} checked={isPreferred}
-                  onChange={() => {}}
-                  onClick={() => store.setPreferredUniqueness(fact.id, u)}
-                  style={{ cursor: 'pointer', accentColor: 'var(--col-mandatory)' }}/>
-                <span>Roles: {u.map(i => i + 1).join(', ')}</span>
-              </label>
-              <button onClick={() => store.toggleUniqueness(fact.id, u)}
-                style={{ background: 'none', color: '#c0392b', border: 'none',
-                  cursor: 'pointer', fontSize: 12 }}>✕</button>
-            </div>
-          )
-        })}
-        {fact.arity > 1 && (
-          <button onClick={() => store.startUniquenessConstruction(fact.id)}
-            style={{ marginTop: 6, padding: '4px 10px', fontSize: 11,
-              background: 'var(--bg-raised)', border: '1px solid var(--border)',
-              borderRadius: 3, color: 'var(--ink-2)', cursor: 'pointer' }}>
-            + Uniqueness Constraint
-          </button>
-        )}
-      </Section>
-
-      <Section title="Frequency Constraints">
-        {(fact.internalFrequency || []).length === 0 && (
-          <div style={{ color: 'var(--ink-muted)', fontSize: 11, marginBottom: 8 }}>None defined</div>
-        )}
-        {(fact.internalFrequency || []).map((ifItem) => (
-          <div key={ifItem.id} style={{ marginBottom: 8, paddingBottom: 8,
-            borderBottom: '1px solid var(--border-soft)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between',
-              alignItems: 'center', marginBottom: 4 }}>
-              <span style={{ fontSize: 12, color: 'var(--ink-2)' }}>
-                Roles: {[...ifItem.roles].sort((a, b) => a - b).map(i => i + 1).join(', ')}
-              </span>
-              <button onClick={() => store.removeInternalFrequency(fact.id, ifItem.id)}
-                style={{ background: 'none', color: '#c0392b', border: 'none',
-                  cursor: 'pointer', fontSize: 12 }}>✕</button>
-            </div>
-            <ValueRangeEditor
-              positiveIntegers
-              range={ifItem.range}
-              onChange={vr => store.updateInternalFrequency(fact.id, ifItem.id, { range: vr })}
-            />
-          </div>
-        ))}
-        {fact.arity > 1 && (
-          <button onClick={() => store.startFrequencyConstruction(fact.id)}
-            style={{ marginTop: 6, padding: '4px 10px', fontSize: 11,
-              background: 'var(--bg-raised)', border: '1px solid var(--border)',
-              borderRadius: 3, color: 'var(--ink-2)', cursor: 'pointer' }}>
-            + Frequency Constraint
-          </button>
-        )}
-      </Section>
-
-      {/* For nested types: Appears in + Delete at the very bottom */}
-      {fact.objectified && (
-        <div style={{ marginBottom: 18 }}>
-          <DiagramList elementId={fact.id} kind="fact" />
-          <DangerBtn onClick={() => store.deleteFact(fact.id)}>
-            {fact.objectifiedKind === 'value' ? 'Delete Nested Value Type' : 'Delete Nested Entity Type'}
-          </DangerBtn>
-        </div>
-      )}
     </>
   )
 }
@@ -1201,6 +1240,7 @@ function ExternalConstraintInspector({ c }) {
       {/* Is Preferred Identifier — only for uniqueness */}
       {c.constraintType === 'uniqueness' && (
         <Row>
+          <Label>Identification</Label>
           <Checkbox
             label="Is Preferred Identifier"
             checked={!!c.isPreferredIdentifier}
@@ -1484,7 +1524,9 @@ function ExternalConstraintInspector({ c }) {
         </div>
       )}
 
-      <DiagramList elementId={c.id} kind="constraint" />
+      <Subsection title="Usage">
+        <DiagramList elementId={c.id} kind="constraint" />
+      </Subsection>
       <DangerBtn onClick={() => store.deleteConstraint(c.id)}>Delete Constraint</DangerBtn>
     </Section>
   )
@@ -1560,7 +1602,9 @@ function ConstraintInspector({ c }) {
         </div>
       ))}
 
-      <DiagramList elementId={c.id} kind="constraint" />
+      <Subsection title="Usage">
+        <DiagramList elementId={c.id} kind="constraint" />
+      </Subsection>
       <div style={{ marginTop: 8 }}>
         <DangerBtn onClick={() => store.deleteConstraint(c.id)}>Delete Constraint</DangerBtn>
       </div>
@@ -1599,7 +1643,21 @@ export default function Inspector() {
   }, [])
 
   const ot  = store.objectTypes.find(o => o.id === selectedId)
-  const fact = store.facts.find(f => f.id === selectedId)
+  const rawFact = store.facts.find(f => f.id === selectedId)
+  // Merge per-diagram position overrides so the inspector sees the same values as the canvas
+  const activeDiagramPos = store.diagrams?.find(d => d.id === store.activeDiagramId)?.positions ?? {}
+  const mergeDiagramPos = (f) => {
+    if (!f) return f
+    const p = activeDiagramPos[f.id]
+    if (!p) return f
+    const merged = { ...f }
+    if (p.readingAbove    !== undefined) merged.readingAbove    = p.readingAbove
+    if (p.readingOffset   !== undefined) merged.readingOffset   = p.readingOffset
+    if (p.uniquenessBelow !== undefined) merged.uniquenessBelow = p.uniquenessBelow
+    if (p.nestedReading   !== undefined) merged.nestedReading   = p.nestedReading
+    return merged
+  }
+  const fact = mergeDiagramPos(rawFact)
   const st   = store.subtypes.find(s => s.id === selectedId)
   const con  = store.constraints.find(c => c.id === selectedId)
 

@@ -573,8 +573,9 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
   const [nameLive,       setNameLive]       = useState(null)  // { dx, dy } | null
   const [editingName,    setEditingName]    = useState(false)
   const [nameDraft,      setNameDraft]      = useState('')
-  const [editingReading, setEditingReading] = useState(false)
-  const [readingDraft,   setReadingDraft]   = useState([])  // string[] of length arity+1
+  const [editingReading,        setEditingReading]        = useState(false)
+  const [editingReadingIsReverse, setEditingReadingIsReverse] = useState(false)
+  const [readingDraft,          setReadingDraft]          = useState([])  // string[] of length arity+1
   const nameInputRef = useRef(null)
   const [editingRefMode, setEditingRefMode] = useState(false)
   const [refModeDraft,   setRefModeDraft]   = useState('')
@@ -733,9 +734,13 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
     const parts = readingDraft.map(p => p.trim())
     while (parts.length < fact.arity + 1) parts.push('')
     parts.length = fact.arity + 1
-    store.updateFact(fact.id, { readingParts: parts })
+    if (editingReadingIsReverse) {
+      store.updateAlternativeReading(fact.id, [1, 0], parts)
+    } else {
+      store.updateFact(fact.id, { readingParts: parts })
+    }
     setEditingReading(false)
-  }, [readingDraft, fact.arity, fact.id, store])
+  }, [readingDraft, editingReadingIsReverse, fact.arity, fact.id, store])
 
   useEffect(() => {
     if (editingRefMode && refModeInputRef.current) {
@@ -1033,8 +1038,23 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
         onDoubleClick={e => {
           e.stopPropagation()
           if (store.sequenceConstruction || inConstruction || inFrequencyConstruction) return
-          const existing = fact.readingParts || []
-          setReadingDraft(Array.from({ length: fact.arity + 1 }, (_, i) => existing[i] ?? ''))
+          let isReverse = displayMode === 'reverse'
+          if (displayMode === 'both') {
+            const ctm = e.currentTarget.ownerSVGElement?.getScreenCTM()
+            const worldClickX = ctm ? (e.clientX - ctm.e) / ctm.a : e.clientX
+            isReverse = worldClickX > tx
+          }
+          if (isReverse) {
+            const reverseAlt = (fact.alternativeReadings || []).find(
+              r => r.roleOrder.length === 2 && r.roleOrder[0] === 1 && r.roleOrder[1] === 0
+            )
+            const existing = reverseAlt?.parts || []
+            setReadingDraft(Array.from({ length: fact.arity + 1 }, (_, i) => existing[i] ?? ''))
+          } else {
+            const existing = fact.readingParts || []
+            setReadingDraft(Array.from({ length: fact.arity + 1 }, (_, i) => existing[i] ?? ''))
+          }
+          setEditingReadingIsReverse(isReverse)
           setEditingReading(true)
         }}>
         {text}

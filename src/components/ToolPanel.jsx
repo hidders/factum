@@ -6,9 +6,9 @@ const COL_CONSTRAINT = '#7c4dbd'
 const ALL_INTERNAL_CONSTRAINT_TYPES = [
   { key: 'internalUniqueness', label: 'Internal Uniqueness', tool: 'addInternalUniqueness', shortcut: 'I' },
   { key: 'mandatoryRole',      label: 'Mandatory Role', tool: 'toggleMandatory', shortcut: 'M' },
-  { key: 'internalFrequency',  label: 'Internal Frequency', tool: 'addInternalFrequency', shortcut: 'Q' },
-  { key: 'cardinality',        label: 'Cardinality', shortcut: 'C' },
   { key: 'valueRange',         label: 'Value Range', shortcut: 'R' },
+  { key: 'cardinality',        label: 'Cardinality', shortcut: 'C' },
+  { key: 'internalFrequency',  label: 'Internal Frequency', tool: 'addInternalFrequency', shortcut: 'Q' },
 ]
 
 const BASIC_INTERNAL_CONSTRAINT_TYPES = ALL_INTERNAL_CONSTRAINT_TYPES.slice(0, 2)
@@ -21,8 +21,8 @@ const ALL_CONSTRAINT_TYPES = [
   { key: 'equality',          label: 'Equality',     short: null },
   { key: 'subset',            label: 'Subset',       short: null },
   { key: 'ring',              label: 'Ring',         short: null },
-  { key: 'frequency',         label: 'External Frequency', short: null },
   { key: 'valueComparison',   label: 'Value Comparison', short: null },
+  { key: 'frequency',         label: 'External Frequency', short: null },
 ]
 
 const BASIC_CONSTRAINT_TYPES = ALL_CONSTRAINT_TYPES.slice(0, 4)
@@ -285,7 +285,7 @@ function ToolBtn({ label, title, active, onClick }) {
       onClick={onClick}
       style={{
         width: '100%',
-        padding: '5px 10px',
+        padding: '3px 10px',
         fontSize: 12,
         textAlign: 'left',
         background: active ? 'var(--accent)' : 'transparent',
@@ -372,7 +372,7 @@ function InternalConstraintBtn({ ct, active, onClick, shortcut }) {
       disabled={greyed}
       style={{
         width: '100%',
-        padding: '4px 10px',
+        padding: '2px 10px',
         fontSize: 12,
         textAlign: 'left',
         display: 'flex',
@@ -404,7 +404,7 @@ function ConstraintBtn({ ct, active, onClick }) {
       onClick={onClick}
       style={{
         width: '100%',
-        padding: '4px 10px',
+        padding: '2px 10px',
         fontSize: 12,
         textAlign: 'left',
         display: 'flex',
@@ -481,7 +481,7 @@ export default function ToolPanel() {
       flexShrink: 0,
       display: 'flex',
       flexDirection: 'column',
-      gap: 1,
+      gap: 0,
       padding: '6px 6px',
       background: 'var(--bg-surface)',
       borderRight: '1px solid var(--border-soft)',
@@ -534,7 +534,7 @@ export default function ToolPanel() {
         onClick={() => store.setTool('select')}
         style={{
           width: '100%',
-          padding: '4px 10px',
+          padding: '2px 10px',
           fontSize: 12,
           textAlign: 'left',
           display: 'flex',
@@ -564,7 +564,7 @@ export default function ToolPanel() {
         onClick={() => store.setTool('addEntity')}
         style={{
           width: '100%',
-          padding: '4px 10px',
+          padding: '2px 10px',
           fontSize: 12,
           textAlign: 'left',
           display: 'flex',
@@ -590,7 +590,7 @@ export default function ToolPanel() {
         onClick={() => store.setTool('addValue')}
         style={{
           width: '100%',
-          padding: '4px 10px',
+          padding: '2px 10px',
           fontSize: 12,
           textAlign: 'left',
           display: 'flex',
@@ -616,7 +616,7 @@ export default function ToolPanel() {
         onClick={() => store.setTool('addFact2')}
         style={{
           width: '100%',
-          padding: '4px 10px',
+          padding: '2px 10px',
           fontSize: 12,
           textAlign: 'left',
           display: 'flex',
@@ -642,7 +642,7 @@ export default function ToolPanel() {
         onClick={() => store.setTool('addNestedFact')}
         style={{
           width: '100%',
-          padding: '4px 10px',
+          padding: '2px 10px',
           fontSize: 12,
           textAlign: 'left',
           display: 'flex',
@@ -668,7 +668,7 @@ export default function ToolPanel() {
         onClick={() => store.setTool('addNestedValueFact')}
         style={{
           width: '100%',
-          padding: '4px 10px',
+          padding: '2px 10px',
           fontSize: 12,
           textAlign: 'left',
           display: 'flex',
@@ -698,7 +698,7 @@ export default function ToolPanel() {
         onClick={() => { store.clearSelection(); store.setTool('assignRole') }}
         style={{
           width: '100%',
-          padding: '4px 10px',
+          padding: '2px 10px',
           fontSize: 12,
           textAlign: 'left',
           display: 'flex',
@@ -724,7 +724,7 @@ export default function ToolPanel() {
         onClick={() => { store.clearSelection(); store.setTool('addSubtype') }}
         style={{
           width: '100%',
-          padding: '4px 10px',
+          padding: '2px 10px',
           fontSize: 12,
           textAlign: 'left',
           display: 'flex',
@@ -750,7 +750,7 @@ export default function ToolPanel() {
         onClick={() => { store.clearSelection(); store.setTool('connectConstraint') }}
         style={{
           width: '100%',
-          padding: '4px 10px',
+          padding: '2px 10px',
           fontSize: 12,
           textAlign: 'left',
           display: 'flex',
@@ -777,7 +777,7 @@ export default function ToolPanel() {
         onClick={() => { store.clearSelection(); store.setTool('addTargetConnector') }}
         style={{
           width: '100%',
-          padding: '4px 10px',
+          padding: '2px 10px',
           fontSize: 12,
           textAlign: 'left',
           display: 'flex',

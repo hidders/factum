@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { EXTERNAL_CONSTRAINT_TYPES } from '../constants.js'
+import { constraintMaxSequences, isSingletonSequence, isOpenEndedConstruction } from '../utils/constraintRules.js'
 
 // ── id generator ──────────────────────────────────────────────────────────────
 let _n = 1
@@ -23,6 +24,29 @@ const mkValue = (x, y) => ({
 const mkRole = () => ({
   id: uid(), objectTypeId: null, roleName: '', mandatory: false,
 })
+
+// Returns the smallest positive integer not already used in any fact reading.
+function nextRelationNumber(facts) {
+  const used = new Set()
+  const re = /^has relation(\d+)/
+  for (const f of facts) {
+    for (const p of (f.readingParts || [])) {
+      const m = re.exec(p?.trim() || ''); if (m) used.add(Number(m[1]))
+    }
+    for (const alt of (f.alternativeReadings || [])) {
+      for (const p of (alt.parts || [])) {
+        const m = re.exec(p?.trim() || ''); if (m) used.add(Number(m[1]))
+      }
+    }
+  }
+  let n = 1; while (used.has(n)) n++; return n
+}
+
+function defaultReadingParts(arity, n) {
+  const parts = Array(arity + 1).fill('')
+  parts[1] = arity === 2 ? `has relation${n} with` : `has relation${n}`
+  return parts
+}
 
 const mkFact = (x, y, arity = 2) => ({
   id: uid(), kind: 'fact',
@@ -715,7 +739,8 @@ export const useOrmStore = create((set, get) => ({
   // ── fact types ──────────────────────────────────────────────────────────
 
   addFact(x, y, arity = 2) {
-    const f = mkFact(Math.round(x), Math.round(y), arity)
+    const n = nextRelationNumber(get().facts)
+    const f = { ...mkFact(Math.round(x), Math.round(y), arity), readingParts: defaultReadingParts(arity, n) }
     set(s => ({
       facts: [...s.facts, f],
       diagrams: s.diagrams.map(d => d.id !== s.activeDiagramId ? d : {
@@ -729,7 +754,8 @@ export const useOrmStore = create((set, get) => ({
   },
 
   addNestedFact(x, y, arity = 2, objectifiedKind = 'entity') {
-    const base = { ...mkFact(Math.round(x), Math.round(y), arity), objectified: true, objectifiedKind, nestedReading: false }
+    const n = nextRelationNumber(get().facts)
+    const base = { ...mkFact(Math.round(x), Math.round(y), arity), readingParts: defaultReadingParts(arity, n), objectified: true, objectifiedKind, nestedReading: false }
     set(s => {
       const used = new Set(
         s.objectTypes.map(o => o.name).concat(s.facts.map(f => f.objectifiedName).filter(Boolean))
@@ -751,7 +777,8 @@ export const useOrmStore = create((set, get) => ({
   },
 
   addNestedValueFact(x, y, arity = 2) {
-    const base = { ...mkFact(Math.round(x), Math.round(y), arity), objectified: true, objectifiedKind: 'value', nestedReading: false }
+    const n = nextRelationNumber(get().facts)
+    const base = { ...mkFact(Math.round(x), Math.round(y), arity), readingParts: defaultReadingParts(arity, n), objectified: true, objectifiedKind: 'value', nestedReading: false }
     set(s => {
       const used = new Set(
         s.objectTypes.filter(o => o.kind === 'value').map(o => o.name)
@@ -816,13 +843,28 @@ export const useOrmStore = create((set, get) => ({
   },
 
   moveFact(id, x, y) {
-    set(s => ({
-      diagrams: s.diagrams.map(d => d.id !== s.activeDiagramId ? d : {
-        ...d,
-        positions: { ...d.positions, [id]: { ...(d.positions[id] ?? {}), x, y } },
-      }),
-      isDirty: true,
-    }))
+    set(s => {
+      const diag   = s.diagrams.find(d => d.id === s.activeDiagramId)
+      const oldPos = diag?.positions?.[id]
+      const fact   = s.facts.find(f => f.id === id)
+      const oldX   = oldPos?.x ?? fact?.x ?? 0
+      const oldY   = oldPos?.y ?? fact?.y ?? 0
+      const dx = x - oldX
+      const dy = y - oldY
+      return {
+        diagrams: s.diagrams.map(d => d.id !== s.activeDiagramId ? d : {
+          ...d,
+          positions: { ...d.positions, [id]: { ...(d.positions[id] ?? {}), x, y } },
+        }),
+        facts: s.facts.map(f => f.id !== id || !f.internalFrequency?.length ? f : {
+          ...f,
+          internalFrequency: f.internalFrequency.map(if_ => ({
+            ...if_, x: if_.x + dx, y: if_.y + dy,
+          })),
+        }),
+        isDirty: true,
+      }
+    })
   },
 
   // Update per-diagram layout properties for a fact (readingAbove, readingOffset,
@@ -1263,11 +1305,9 @@ export const useOrmStore = create((set, get) => ({
     if (!c) return
     const sequences = c.sequences || []
     let steps
-    const isSingleton = c.constraintType === 'inclusiveOr' || c.constraintType === 'exclusiveOr' || c.constraintType === 'uniqueness' || c.constraintType === 'frequency'
-    const openEndedType = c.constraintType === 'equality' || c.constraintType === 'subset' ||
-      c.constraintType === 'exclusion'
-    const maxSequences = (c.constraintType === 'equality' || c.constraintType === 'subset' || c.constraintType === 'valueComparison') ? 2
-      : c.constraintType === 'ring' ? 1 : Infinity
+    const isSingleton   = isSingletonSequence(c.constraintType)
+    const openEndedType = isOpenEndedConstruction(c.constraintType)
+    const maxSequences  = constraintMaxSequences(c.constraintType)
     if (mode === 'newSequence') {
       if (sequences.length >= maxSequences) return
       const newSequenceIdx = sequences.length
