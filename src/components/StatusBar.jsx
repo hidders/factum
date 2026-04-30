@@ -44,7 +44,7 @@ export default function StatusBar() {
 
   // ── Tier 2: selection hints — affordances for the selected element ────────
   const factHint = isSel && store.selectedKind === 'fact'
-    ? 'Click a role to select it · Double-click a role to start a role connector · Click a uniqueness bar to select it · Right-click for more options'
+    ? 'Click inside a role to select it · Double-click inside a role to start a connector · Click a uniqueness bar to select it · Right-click for more options'
     : null
 
   const otHint = isSel && (store.selectedKind === 'entity' || store.selectedKind === 'value')
@@ -52,7 +52,7 @@ export default function StatusBar() {
     : null
 
   const roleHint = isSel && store.selectedRole
-    ? 'Double-click to start a role connector · Click again to deselect · Right-click for options'
+    ? 'Double-click to start a connector · Click inside role again to deselect · Click role border to select fact · Right-click for options'
     : null
 
   const subtypeHint = isSel && store.selectedKind === 'subtype'

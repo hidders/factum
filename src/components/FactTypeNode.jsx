@@ -398,9 +398,7 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
   const handleRoleDoubleClick = useCallback((roleIndex, e) => {
     e.stopPropagation()
     if (store.sequenceConstruction || inConstruction) return
-    const roleAlreadySelected =
-      store.selectedRole?.factId === fact.id && store.selectedRole?.roleIndex === roleIndex
-    if (!roleAlreadySelected) return
+    if (store.tool !== 'select') return
     store.setTool('assignRole')
     store.setLinkDraft({ type: 'roleAssign', factId: fact.id, roleIndex, autoReturn: true })
   }, [store, fact.id, inConstruction])
@@ -505,50 +503,40 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
       return
     }
 
-    const thisRoleSelected =
-      store.selectedRole?.factId === fact.id && store.selectedRole?.roleIndex === roleIndex
-
-    if (thisRoleSelected) {
-      // Role already selected → click deselects role back to fact; drag drags the fact type
+    // Select mode: use click position to decide border (→ fact) vs interior (→ role)
+    const thisRoleSelected = store.selectedRole?.factId === fact.id && store.selectedRole?.roleIndex === roleIndex
+    const BORDER_PX = 3 * store.zoom
+    const bbox = e.currentTarget.getBoundingClientRect()
+    const inInterior = (
+      e.clientX > bbox.left + BORDER_PX && e.clientX < bbox.right  - BORDER_PX &&
+      e.clientY > bbox.top  + BORDER_PX && e.clientY < bbox.bottom - BORDER_PX
+    )
+    if (inInterior) {
       const startX = e.clientX, startY = e.clientY
       let done = false
-      const cleanup = () => {
+      const onMove = (me) => {
+        const dx = me.clientX - startX, dy = me.clientY - startY
+        if (dx * dx + dy * dy > 16) {
+          if (done) return; done = true
+          window.removeEventListener('mousemove', onMove)
+          window.removeEventListener('mouseup',   onUp)
+          onDragStart(fact.id, 'fact', { clientX: startX, clientY: startY })
+        }
+      }
+      const onUp = () => {
         if (done) return; done = true
         window.removeEventListener('mousemove', onMove)
         window.removeEventListener('mouseup',   onUp)
+        if (thisRoleSelected) store.select(fact.id, 'fact')
+        else                  store.selectRole(fact.id, roleIndex)
       }
-      const onMove = (me) => {
-        const dx = me.clientX - startX, dy = me.clientY - startY
-        if (dx * dx + dy * dy > 16) { cleanup(); onDragStart(fact.id, 'fact', { clientX: startX, clientY: startY }) }
-      }
-      const onUp = () => { cleanup(); store.select(fact.id, 'fact') }
       window.addEventListener('mousemove', onMove)
       window.addEventListener('mouseup',   onUp)
-      return
+    } else {
+      // Border click: select fact and start drag
+      store.select(fact.id, 'fact')
+      onDragStart(fact.id, 'fact', e)
     }
-
-    if (isSelected) {
-      // Fact selected but role not yet selected → select role; drag drags the fact type
-      const startX = e.clientX, startY = e.clientY
-      let done = false
-      const cleanup = () => {
-        if (done) return; done = true
-        window.removeEventListener('mousemove', onMove)
-        window.removeEventListener('mouseup',   onUp)
-      }
-      const onMove = (me) => {
-        const dx = me.clientX - startX, dy = me.clientY - startY
-        if (dx * dx + dy * dy > 16) { cleanup(); onDragStart(fact.id, 'fact', { clientX: startX, clientY: startY }) }
-      }
-      const onUp = () => { cleanup(); store.selectRole(fact.id, roleIndex) }
-      window.addEventListener('mousemove', onMove)
-      window.addEventListener('mouseup',   onUp)
-      return
-    }
-
-    // Fact not selected → select fact and start drag
-    store.select(fact.id, 'fact')
-    onDragStart(fact.id, 'fact', e)
   }, [store, fact.id, isAssignTool, inConstruction, inFrequencyConstruction, isSelected, onDragStart])
 
   // ── Annotation drag (value-range labels + reading text) ───────────────────
