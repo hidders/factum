@@ -1124,6 +1124,54 @@ export const useOrmStore = create((set, get) => ({
     }))
   },
 
+  reverseRoles(factId) {
+    set(s => ({
+      facts: s.facts.map(f => {
+        if (f.id !== factId || f.arity !== 2) return f
+        const roles = [f.roles[1], f.roles[0]]
+        const oldToNew = { 0: 1, 1: 0 }
+        const uniqueness = f.uniqueness.map(u => u.map(i => oldToNew[i]))
+        const remappedAlts = (f.alternativeReadings || []).map(r => ({
+          ...r,
+          roleOrder: r.roleOrder.map(i => oldToNew[i]),
+        }))
+        const defaultKey = '[0,1]'
+        const promoted = remappedAlts.find(r => JSON.stringify(r.roleOrder) === defaultKey)
+
+        let readingParts = f.readingParts
+        let alternativeReadings = remappedAlts
+
+        if (promoted) {
+          readingParts = promoted.parts
+          alternativeReadings = remappedAlts.filter(r => JSON.stringify(r.roleOrder) !== defaultKey)
+          if (f.readingParts && f.readingParts.some(p => p?.trim())) {
+            alternativeReadings = [...alternativeReadings, { roleOrder: [1, 0], parts: f.readingParts }]
+          }
+        }
+
+        return { ...f, roles, uniqueness, readingParts, alternativeReadings }
+      }),
+      isDirty: true,
+    }))
+  },
+
+  reverseImplicitLinkRoles(factId, roleIndex) {
+    set(s => ({
+      facts: s.facts.map(f => {
+        if (f.id !== factId) return f
+        return {
+          ...f,
+          implicitLinks: (f.implicitLinks || []).map(il => {
+            if (il.roleIndex !== roleIndex) return il
+            const current = il.roleOrder || [0, 1]
+            return { ...il, roleOrder: [current[1], current[0]] }
+          }),
+        }
+      }),
+      isDirty: true,
+    }))
+  },
+
   insertRole(factId, atIndex) {
     set(s => {
       const facts = s.facts.map(f => {

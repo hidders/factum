@@ -108,6 +108,10 @@ export function useContextMenuHandlers(store, setContextMenu, setVrPopup) {
           action: () => store.updateFact(fact.id, {
             orientation: fact.orientation === 'vertical' ? 'horizontal' : 'vertical'
           }) },
+        ...(fact.arity === 2 ? [
+          { label: 'Reverse Roles',
+            action: () => store.reverseRoles(fact.id) },
+        ] : []),
         '---',
         ...(fact.arity > 1 ? [
           { label: 'Add Uniqueness Constraint',
@@ -400,6 +404,8 @@ export function useContextMenuHandlers(store, setContextMenu, setVrPopup) {
           action: () => store.updateImplicitLink(factId, roleIndex, {
             orientation: isVertical ? 'horizontal' : 'vertical'
           }) },
+        { label: 'Reverse Roles',
+          action: () => store.reverseImplicitLinkRoles(factId, roleIndex) },
         '---',
         { label: 'Remove from Diagram',
           action: () => store.toggleImplicitLink(factId, roleIndex) },
