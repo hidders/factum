@@ -2253,8 +2253,8 @@ export const useOrmStore = create((set, get) => ({
     const ifItem = (fact.internalFrequency || []).find(i => i.id === ifId)
     if (!ifItem) return
     const roles = [...ifItem.roles]
-    const key = JSON.stringify([...roles].sort())
-    const alreadyExists = fact.uniqueness.some(u => JSON.stringify([...u].sort()) === key)
+    const key = JSON.stringify([...roles].sort((a, b) => a - b))
+    const alreadyExists = fact.uniqueness.some(u => JSON.stringify([...u].sort((a, b) => a - b)) === key)
     set(s => ({
       facts: s.facts.map(f => {
         if (f.id !== factId) return f
@@ -2267,7 +2267,7 @@ export const useOrmStore = create((set, get) => ({
     }))
     if (!alreadyExists) {
       const updated = get().facts.find(f => f.id === factId)
-      const uIndex = updated.uniqueness.findIndex(u => JSON.stringify([...u].sort()) === key)
+      const uIndex = updated.uniqueness.findIndex(u => JSON.stringify([...u].sort((a, b) => a - b)) === key)
       if (uIndex !== -1) get().selectUniqueness(factId, uIndex)
     } else {
       get().select(factId, 'fact')
@@ -2278,19 +2278,21 @@ export const useOrmStore = create((set, get) => ({
     const fact = get().facts.find(f => f.id === factId)
     if (!fact) return
     const ifId = uid()
-    const key = JSON.stringify([...uRoles].sort())
+    const key = JSON.stringify([...uRoles].sort((a, b) => a - b))
+    const activeDiagram = get().diagrams.find(d => d.id === get().activeDiagramId)
+    const factPos = activeDiagram?.positions[factId] ?? { x: fact.x, y: fact.y }
     set(s => ({
       facts: s.facts.map(f => {
         if (f.id !== factId) return f
-        const uniqueness = f.uniqueness.filter(u => JSON.stringify([...u].sort()) !== key)
+        const uniqueness = f.uniqueness.filter(u => JSON.stringify([...u].sort((a, b) => a - b)) !== key)
         const preferredUniqueness = f.preferredUniqueness &&
-          JSON.stringify([...f.preferredUniqueness].sort()) === key ? null : f.preferredUniqueness
+          JSON.stringify([...f.preferredUniqueness].sort((a, b) => a - b)) === key ? null : f.preferredUniqueness
         return {
           ...f,
           uniqueness,
           preferredUniqueness,
           internalFrequency: [...(f.internalFrequency || []), {
-            id: ifId, roles: [...uRoles], range: [{ type: 'upper', upper: 1 }], x: f.x + 40, y: f.y - 30,
+            id: ifId, roles: [...uRoles], range: [{ type: 'upper', upper: 1 }], x: factPos.x + 40, y: factPos.y - 30,
           }],
         }
       }),

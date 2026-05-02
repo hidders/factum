@@ -149,6 +149,8 @@ export function useContextMenuHandlers(store, setContextMenu, setVrPopup) {
   }, [store, setContextMenu, handleMultiSelectionContextMenu])
 
   const handleIfContextMenu = useCallback((fact, ifId, e) => {
+    e.preventDefault()
+    e.stopPropagation()
     setContextMenu({
       x: e.clientX, y: e.clientY,
       items: [
@@ -165,6 +167,8 @@ export function useContextMenuHandlers(store, setContextMenu, setVrPopup) {
   }, [store, setContextMenu])
 
   const handleRoleValueContextMenu = useCallback((fact, roleIndex, e) => {
+    e.preventDefault()
+    e.stopPropagation()
     setContextMenu({
       x: e.clientX, y: e.clientY,
       items: [
@@ -180,6 +184,8 @@ export function useContextMenuHandlers(store, setContextMenu, setVrPopup) {
   }, [store, setContextMenu, setVrPopup])
 
   const handleRoleCrContextMenu = useCallback((fact, roleIndex, e) => {
+    e.preventDefault()
+    e.stopPropagation()
     setContextMenu({
       x: e.clientX, y: e.clientY,
       items: [
@@ -196,6 +202,8 @@ export function useContextMenuHandlers(store, setContextMenu, setVrPopup) {
   }, [store, setContextMenu, setVrPopup])
 
   const handleNestedVrContextMenu = useCallback((fact, e) => {
+    e.preventDefault()
+    e.stopPropagation()
     setContextMenu({
       x: e.clientX, y: e.clientY,
       items: [
@@ -211,6 +219,8 @@ export function useContextMenuHandlers(store, setContextMenu, setVrPopup) {
   }, [store, setContextMenu, setVrPopup])
 
   const handleNestedCrContextMenu = useCallback((fact, e) => {
+    e.preventDefault()
+    e.stopPropagation()
     setContextMenu({
       x: e.clientX, y: e.clientY,
       items: [
@@ -227,6 +237,8 @@ export function useContextMenuHandlers(store, setContextMenu, setVrPopup) {
   }, [store, setContextMenu, setVrPopup])
 
   const handleOtValueRangeContextMenu = useCallback((ot, e) => {
+    e.preventDefault()
+    e.stopPropagation()
     setContextMenu({
       x: e.clientX, y: e.clientY,
       items: [
@@ -242,6 +254,8 @@ export function useContextMenuHandlers(store, setContextMenu, setVrPopup) {
   }, [store, setContextMenu, setVrPopup])
 
   const handleOtCardinalityRangeContextMenu = useCallback((ot, e) => {
+    e.preventDefault()
+    e.stopPropagation()
     setContextMenu({
       x: e.clientX, y: e.clientY,
       items: [
@@ -258,6 +272,8 @@ export function useContextMenuHandlers(store, setContextMenu, setVrPopup) {
   }, [store, setContextMenu, setVrPopup])
 
   const handleMandatoryDotContextMenu = useCallback((factId, roleIndex, e) => {
+    e.preventDefault()
+    e.stopPropagation()
     setContextMenu({
       x: e.clientX, y: e.clientY,
       items: [

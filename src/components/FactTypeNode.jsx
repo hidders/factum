@@ -939,7 +939,6 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
     return () => window.removeEventListener('mousedown', onDown, true)
   }, [editingRefMode, commitRefModeEdit])
 
-  const isNestedSubtypeCandidate = fact.objectified && !isDraftFrom && (isSubtypeTool || isTargetTool)
   // Stage-1 frequency: tool is active but no construction started yet → fact is selectable candidate
   const isFrequencyCandidate = isFrequencyTool && !store.frequencyConstruction
   const roleStroke    = isFactSelected               ? 'var(--accent)'
