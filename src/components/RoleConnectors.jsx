@@ -117,6 +117,14 @@ export default function RoleConnectors({ mousePos }) {
   const nestedMap = Object.fromEntries(visibleFacts.filter(f => f.objectified).map(f => [f.id, f]))
   const dotAtObject = store.mandatoryDotPosition === 'object'
 
+  // Read diagram positions for role name offsets
+  const diagPos = store.diagrams?.find(d => d.id === store.activeDiagramId)?.positions ?? {}
+
+  const getRoleNameOffset = (factId, roleIndex) => {
+    const p = diagPos[factId]
+    return p?.roleNameOffsets?.[roleIndex] ?? null
+  }
+
   // ── role-name label drag + inline edit ────────────────────────────────────
   const dragRef = useRef(null)
   const [liveDrag, setLiveDrag] = useState(null) // { factId, roleIndex, dx, dy } | null
@@ -157,7 +165,21 @@ export default function RoleConnectors({ mousePos }) {
     if (!editing) return
     const onDown = (e) => {
       if (!e.target.closest?.('foreignObject')) {
-        store.updateRole(editing.factId, editing.roleIndex, { roleName: editing.draft.trim() })
+        const trimmed = editing.draft.trim()
+        if (editing.factId.includes('_il_')) {
+          const [parentFactId, ilRoleIdxStr] = editing.factId.split('_il_')
+          const ilRoleIndex = Number(ilRoleIdxStr)
+          const s = useOrmStore.getState()
+          const f = s.facts.find(ff => ff.id === parentFactId)
+          const il = f?.implicitLinks?.find(l => l.roleIndex === ilRoleIndex)
+          if (il) {
+            const roleNames = [...(il.roleNames || [null, null])]
+            roleNames[editing.roleIndex] = trimmed || null
+            s.updateImplicitLink(parentFactId, ilRoleIndex, { roleNames })
+          }
+        } else {
+          store.updateRole(editing.factId, editing.roleIndex, { roleName: trimmed })
+        }
         setEditing(null)
       }
     }
@@ -197,7 +219,7 @@ export default function RoleConnectors({ mousePos }) {
         anchor, border, dotPos,
         mx, my,
         autoOffset: { dx: autoOx, dy: autoOy },
-        nameOffset: role.nameOffset ?? null,
+        nameOffset: getRoleNameOffset(fact.id, ri) ?? role.nameOffset ?? null,
         roleName: role.roleName,
       }
     }).filter(Boolean)
@@ -243,7 +265,7 @@ export default function RoleConnectors({ mousePos }) {
           anchor, border, dotPos,
           mx, my,
           autoOffset: { dx: -edgeDy / len * 9, dy: edgeDx / len * 9 },
-          nameOffset: null,
+          nameOffset: getRoleNameOffset(synthFact.id, ri),
           roleName: roleNames[ri] || '',
           isImplicit: true,
         }
@@ -265,7 +287,7 @@ export default function RoleConnectors({ mousePos }) {
 
       {/* Role name labels — draggable, offset stored relative to connector midpoint */}
       {store.showRoleNames && allConnectors.map(({ key, factId, roleIndex, roleName,
-                                                mx, my, autoOx, autoOy, customOffset }) => {
+                                                mx, my, autoOffset, nameOffset }) => {
         if (!roleName) return null
 
         // Resolve current label position
@@ -274,12 +296,12 @@ export default function RoleConnectors({ mousePos }) {
         if (isDragging) {
           lx = mx + liveDrag.dx;  ly = my + liveDrag.dy
           origDx = liveDrag.dx;   origDy = liveDrag.dy
-        } else if (customOffset) {
-          lx = mx + customOffset.dx;  ly = my + customOffset.dy
-          origDx = customOffset.dx;   origDy = customOffset.dy
+        } else if (nameOffset) {
+          lx = mx + nameOffset.dx;  ly = my + nameOffset.dy
+          origDx = nameOffset.dx;   origDy = nameOffset.dy
         } else {
-          lx = mx + autoOx;  ly = my + autoOy
-          origDx = autoOx;   origDy = autoOy
+          lx = mx + (autoOffset?.dx ?? 0);  ly = my + (autoOffset?.dy ?? 0)
+          origDx = autoOffset?.dx ?? 0;   origDy = autoOffset?.dy ?? 0
         }
 
         const isEditingThis = editing?.factId === factId && editing?.roleIndex === roleIndex
@@ -337,9 +359,20 @@ export default function RoleConnectors({ mousePos }) {
             }}
             onDoubleClick={e => {
               e.stopPropagation()
-              const fact = useOrmStore.getState().facts.find(f => f.id === factId)
-              const role = fact?.roles[roleIndex]
-              setEditing({ factId, roleIndex, draft: role?.roleName || '' })
+              let draft = ''
+              if (factId.includes('_il_')) {
+                const [parentFactId, ilRoleIdxStr] = factId.split('_il_')
+                const ilRoleIndex = Number(ilRoleIdxStr)
+                const s = useOrmStore.getState()
+                const f = s.facts.find(ff => ff.id === parentFactId)
+                const il = f?.implicitLinks?.find(l => l.roleIndex === ilRoleIndex)
+                draft = (il?.roleNames || [null, null])[roleIndex] || ''
+              } else {
+                const fact = useOrmStore.getState().facts.find(f => f.id === factId)
+                const role = fact?.roles[roleIndex]
+                draft = role?.roleName || ''
+              }
+              setEditing({ factId, roleIndex, draft })
             }}>
             [{roleName}]
           </text>
