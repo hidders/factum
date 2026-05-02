@@ -172,11 +172,21 @@ export function makeImplicitLinkFact(parentFact, implicitLink, store) {
     { objectTypeId: nestedOtid, roleName: '', mandatory: true },
     { objectTypeId: associatedOtid, roleName: role?.roleName || '', mandatory: false },
   ]
+
+  const otMap = Object.fromEntries(store.objectTypes.map(o => [o.id, o]))
+  const nestedMap = Object.fromEntries(store.facts.filter(f => f.objectified).map(f => [f.id, f]))
+  const associatedOt = otMap[associatedOtid]
+  const associatedNf = !associatedOt ? nestedMap[associatedOtid] : null
+
+  const baseX = implicitLink.x ?? parentFact.x
+  const baseY = implicitLink.y ?? parentFact.y
+  const x = implicitLink.x != null ? implicitLink.x : (associatedOt ? Math.round((parentFact.x + associatedOt.x) / 2) : baseX)
+  const y = implicitLink.y != null ? implicitLink.y : (associatedOt ? Math.round((parentFact.y + associatedOt.y) / 2) : baseY)
+
   return {
     id: `${parentFact.id}_il_${implicitLink.roleIndex}`,
     kind: 'fact',
-    x: implicitLink.x ?? parentFact.x,
-    y: implicitLink.y ?? parentFact.y,
+    x, y,
     arity: 2,
     roles: roleOrder.map((srcIdx, i) => ({
       id: `${parentFact.id}_il_${implicitLink.roleIndex}_r${i}`,
@@ -189,7 +199,7 @@ export function makeImplicitLinkFact(parentFact, implicitLink, store) {
     readingParts: implicitLink.readingParts || ['', 'involves', ''],
     alternativeReadings: implicitLink.alternativeReadings || [],
     readingDisplay: implicitLink.readingDisplay || 'forward',
-    shownReadingOrder: null,
+    shownReadingOrder: roleOrder,
     uniqueness: [[0]],
     preferredUniqueness: null,
     internalFrequency: [],
@@ -342,10 +352,10 @@ export function factBounds(fact) {
 
 export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleContextMenu, onBarContextMenu, onRoleValueClick, onNestedVrClick, onRoleCardinalityClick, onNestedCrClick, onIfContextMenu, onRoleValueContextMenu, onRoleCrContextMenu, onNestedVrContextMenu, onNestedCrContextMenu, isShared }) {
   const store = useOrmStore()
-  const isSelected     = store.selectedId === fact.id || store.multiSelectedIds.includes(fact.id)
+  const isImplicitSelected = fact._implicit && store.selectedKind === 'implicitLink' && store.selectedId === fact._parentFactId && store.selectedImplicitRole === fact._implicitRoleIndex
+  const isSelected     = store.selectedId === fact.id || store.multiSelectedIds.includes(fact.id) || isImplicitSelected
   const hasSelectedRole = store.selectedRole?.factId === fact.id
   const hasSelectedUniqueness = store.selectedUniqueness?.factId === fact.id
-  // Visual selection: suppress fact-level highlight when a role or uniqueness bar is selected
   const isFactSelected  = isSelected && !hasSelectedRole && !hasSelectedUniqueness
   const isAssignTool      = store.tool === 'assignRole'
   const isSubtypeTool     = store.tool === 'addSubtype'

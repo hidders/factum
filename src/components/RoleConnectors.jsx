@@ -211,13 +211,14 @@ export default function RoleConnectors({ mousePos }) {
       if (!role?.objectTypeId) return []
       const ot = otMap[role.objectTypeId]
       if (!ot) return []
+      const roleOrder = il.roleOrder || [0, 1]
       const synthFact = {
         id: `${fact.id}_il_${il.roleIndex}`,
         x: il.x ?? fact.x, y: il.y ?? fact.y,
         arity: 2, orientation: il.orientation || 'horizontal',
         roles: [
-          { objectTypeId: fact.id, nameOffset: null },
-          { objectTypeId: ot.id, nameOffset: null },
+          { objectTypeId: roleOrder[0] === 0 ? fact.id : ot.id, nameOffset: null },
+          { objectTypeId: roleOrder[1] === 0 ? fact.id : ot.id, nameOffset: null },
         ],
       }
       return [0, 1].map(ri => {
@@ -242,7 +243,7 @@ export default function RoleConnectors({ mousePos }) {
           mx, my,
           autoOffset: { dx: -edgeDy / len * 9, dy: edgeDx / len * 9 },
           nameOffset: null,
-          roleName: '',
+          roleName: ri === 0 && roleOrder[0] === 1 ? role.roleName : (ri === 1 && roleOrder[1] === 1 ? role.roleName : ''),
           isImplicit: true,
         }
       }).filter(Boolean)
