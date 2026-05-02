@@ -59,6 +59,7 @@
       "icon": "build/icon.icns"
     },
     "dmg": {
+      "background": null,
       "title": "FreeFBM ${version}",
       "artifactName": "FreeFBM-${version}-mac-${arch}.${ext}"
     },
