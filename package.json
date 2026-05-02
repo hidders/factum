@@ -1,6 +1,6 @@
 {
   "name": "freefbm",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "FreeFBM — ORM2 Conceptual Modelling Editor",
   "main": "electron/main.cjs",
   "author": {
