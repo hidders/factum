@@ -3,6 +3,7 @@ import { useOrmStore } from '../store/ormStore'
 import { useDiagramElements } from '../hooks/useDiagramElements'
 import { entityBounds } from './ObjectTypeNode'
 import { ROLE_W, ROLE_H, ROLE_GAP, nestedFactBounds, displayRoleOrder } from './FactTypeNode'
+import { isSelectionMode, isElementSelecting } from '../utils/cursorUtils'
 
 const DOT_R = 4  // mandatory dot radius
 
@@ -264,7 +265,7 @@ export default function RoleConnectors({ mousePos }) {
         const { x: px, y: py } = playerXY(targetOt, targetNf)
         const anchor = roleAnchor(synthFact, ri, px, py)
         const border = playerBorderPoint(targetOt, targetNf, anchor.x, anchor.y)
-        const isMandatoryRole = sRole.objectTypeId === fact.id
+        const isMandatoryRole = sRole.objectTypeId === fact.id || (ri === 1 && role?.mandatory)
         const dotPos = isMandatoryRole ? anchor : (dotAtObject ? border : anchor)
         const mx = (anchor.x + border.x) / 2
         const my = (anchor.y + border.y) / 2
@@ -457,7 +458,7 @@ export function MandatoryDots({ onContextMenu }) {
           const pos    = dotAtObject ? border : anchor
           const isSelected = sel?.factId === fact.id && sel?.roleIndex === ri
           return (
-            <g key={`dot-${fact.id}-${ri}`} className="selectable-group" style={{ cursor: 'pointer', filter: isSelected ? 'drop-shadow(0 0 3px var(--accent))' : undefined }}>
+            <g key={`dot-${fact.id}-${ri}`} className="selectable-group" style={{ cursor: isElementSelecting(store.tool, store.sequenceConstruction) ? 'not-allowed' : 'pointer', filter: isSelected ? 'drop-shadow(0 0 3px var(--accent))' : undefined }}>
               <circle
                 cx={pos.x} cy={pos.y} r={DOT_R}
                 fill="var(--col-mandatory)"
@@ -479,60 +480,116 @@ export function MandatoryDots({ onContextMenu }) {
           )
         }).filter(Boolean)
       )}
-      {/* Mandatory dots for implicit links (role 0 is always mandatory) */}
+      {/* Mandatory dots for implicit links (role 0 is always mandatory; role 1 is mandatory if base role is mandatory) */}
       {visibleFacts.flatMap(fact => {
         if (!fact.objectified) return []
         return (fact.implicitLinks || []).filter(il => store.isImplicitLinkShown(fact.id, il.roleIndex)).map(il => {
           const role = fact.roles[il.roleIndex]
-          if (!role?.objectTypeId) return null
-          const ot = otMap[role.objectTypeId]
-          const nf = !ot ? nestedMap[role.objectTypeId] : null
-          if (!ot && !nf) return null
-          const ilKey = `${fact.id}:il:${il.roleIndex}`
-          const ilPos = diagPos[ilKey]
-          const schemaX = il.x
-          const schemaY = il.y
-          const defaultX = (ot || nf) ? Math.round((fact.x + (ot || nf).x) / 2) : fact.x
-          const defaultY = (ot || nf) ? Math.round((fact.y + (ot || nf).y) / 2) : fact.y
-          const ilX = ilPos?.x ?? schemaX ?? defaultX
-          const ilY = ilPos?.y ?? schemaY ?? defaultY
           const roleOrder = il.roleOrder || [0, 1]
-          const mandatoryDisplayRole = roleOrder.indexOf(0)
-          const synthFact = {
-            id: `${fact.id}_il_${il.roleIndex}`,
-            x: ilX, y: ilY,
-            arity: 2, orientation: il.orientation || 'horizontal',
+          const results = []
+
+          // Role 0 (nested fact) — always mandatory
+          if (role?.objectTypeId) {
+            const ot = otMap[role.objectTypeId]
+            const nf = !ot ? nestedMap[role.objectTypeId] : null
+            if (ot || nf) {
+              const ilKey = `${fact.id}:il:${il.roleIndex}`
+              const ilPos = diagPos[ilKey]
+              const schemaX = il.x
+              const schemaY = il.y
+              const defaultX = (ot || nf) ? Math.round((fact.x + (ot || nf).x) / 2) : fact.x
+              const defaultY = (ot || nf) ? Math.round((fact.y + (ot || nf).y) / 2) : fact.y
+              const ilX = ilPos?.x ?? schemaX ?? defaultX
+              const ilY = ilPos?.y ?? schemaY ?? defaultY
+              const mandatoryDisplayRole = roleOrder.indexOf(0)
+              const synthFact = {
+                id: `${fact.id}_il_${il.roleIndex}`,
+                x: ilX, y: ilY,
+                arity: 2, orientation: il.orientation || 'horizontal',
+              }
+              const targetOt = otMap[fact.id]
+              const targetNf = !targetOt ? nestedMap[fact.id] : null
+              if (targetOt || targetNf) {
+                const { x: px, y: py } = playerXY(targetOt, targetNf)
+                const anchor = roleAnchor(synthFact, mandatoryDisplayRole, px, py)
+                const border = playerBorderPoint(targetOt, targetNf, anchor.x, anchor.y)
+                const pos = dotAtObject ? border : anchor
+                const isSelected = sel?.factId === synthFact.id && sel?.roleIndex === mandatoryDisplayRole
+                results.push(
+                  <g key={`dot-${synthFact.id}-${mandatoryDisplayRole}`} className="selectable-group" style={{ cursor: isElementSelecting(store.tool, store.sequenceConstruction) ? 'not-allowed' : 'pointer', filter: isSelected ? 'drop-shadow(0 0 3px var(--accent))' : undefined }}>
+                    <circle
+                      cx={pos.x} cy={pos.y} r={DOT_R}
+                      fill="var(--col-mandatory)"
+                      onClick={e => {
+                        e.stopPropagation()
+                        if (isSelected) store.deselectMandatoryDot()
+                        else store.selectMandatoryDot(synthFact.id, mandatoryDisplayRole)
+                      }}
+                      onContextMenu={e => {
+                        e.preventDefault(); e.stopPropagation()
+                        store.selectMandatoryDot(synthFact.id, mandatoryDisplayRole)
+                        onContextMenu?.(synthFact.id, mandatoryDisplayRole, e)
+                      }}/>
+                    <rect className="hover-ring"
+                      x={pos.x - DOT_R - 3} y={pos.y - DOT_R - 3}
+                      width={(DOT_R + 3) * 2} height={(DOT_R + 3) * 2}
+                      rx={DOT_R + 3}/>
+                  </g>
+                )
+              }
+            }
           }
-          const targetOt = otMap[fact.id]
-          const targetNf = !targetOt ? nestedMap[fact.id] : null
-          if (!targetOt && !targetNf) return null
-          const { x: px, y: py } = playerXY(targetOt, targetNf)
-          const anchor = roleAnchor(synthFact, mandatoryDisplayRole, px, py)
-          const border = playerBorderPoint(targetOt, targetNf, anchor.x, anchor.y)
-          const pos = dotAtObject ? border : anchor
-          const isSelected = sel?.factId === synthFact.id && sel?.roleIndex === mandatoryDisplayRole
-          return (
-            <g key={`dot-${synthFact.id}-${mandatoryDisplayRole}`} className="selectable-group" style={{ cursor: 'pointer', filter: isSelected ? 'drop-shadow(0 0 3px var(--accent))' : undefined }}>
-              <circle
-                cx={pos.x} cy={pos.y} r={DOT_R}
-                fill="var(--col-mandatory)"
-                onClick={e => {
-                  e.stopPropagation()
-                  if (isSelected) store.deselectMandatoryDot()
-                  else store.selectMandatoryDot(synthFact.id, mandatoryDisplayRole)
-                }}
-                onContextMenu={e => {
-                  e.preventDefault(); e.stopPropagation()
-                  store.selectMandatoryDot(synthFact.id, mandatoryDisplayRole)
-                  onContextMenu?.(synthFact.id, mandatoryDisplayRole, e)
-                }}/>
-              <rect className="hover-ring"
-                x={pos.x - DOT_R - 3} y={pos.y - DOT_R - 3}
-                width={(DOT_R + 3) * 2} height={(DOT_R + 3) * 2}
-                rx={DOT_R + 3}/>
-            </g>
-          )
-        }).filter(Boolean)
+
+          // Role 1 (associated object type) — mandatory if base role is mandatory
+          if (role?.mandatory) {
+            const associatedOt = otMap[role.objectTypeId]
+            const associatedNf = !associatedOt ? nestedMap[role.objectTypeId] : null
+            if (associatedOt || associatedNf) {
+              const ilKey = `${fact.id}:il:${il.roleIndex}`
+              const ilPos = diagPos[ilKey]
+              const schemaX = il.x
+              const schemaY = il.y
+              const defaultX = (associatedOt || associatedNf) ? Math.round((fact.x + (associatedOt || associatedNf).x) / 2) : fact.x
+              const defaultY = (associatedOt || associatedNf) ? Math.round((fact.y + (associatedOt || associatedNf).y) / 2) : fact.y
+              const ilX = ilPos?.x ?? schemaX ?? defaultX
+              const ilY = ilPos?.y ?? schemaY ?? defaultY
+              const mandatoryDisplayRole = roleOrder.indexOf(1)
+              const synthFact = {
+                id: `${fact.id}_il_${il.roleIndex}`,
+                x: ilX, y: ilY,
+                arity: 2, orientation: il.orientation || 'horizontal',
+              }
+              const { x: px, y: py } = playerXY(associatedOt, associatedNf)
+              const anchor = roleAnchor(synthFact, mandatoryDisplayRole, px, py)
+              const border = playerBorderPoint(associatedOt, associatedNf, anchor.x, anchor.y)
+              const pos = dotAtObject ? border : anchor
+              const isSelected = sel?.factId === synthFact.id && sel?.roleIndex === mandatoryDisplayRole
+              results.push(
+                <g key={`dot-${synthFact.id}-r1-${mandatoryDisplayRole}`} className="selectable-group" style={{ cursor: isElementSelecting(store.tool, store.sequenceConstruction) ? 'not-allowed' : 'pointer', filter: isSelected ? 'drop-shadow(0 0 3px var(--accent))' : undefined }}>
+                  <circle
+                    cx={pos.x} cy={pos.y} r={DOT_R}
+                    fill="var(--col-mandatory)"
+                    onClick={e => {
+                      e.stopPropagation()
+                      if (isSelected) store.deselectMandatoryDot()
+                      else store.selectMandatoryDot(synthFact.id, mandatoryDisplayRole)
+                    }}
+                    onContextMenu={e => {
+                      e.preventDefault(); e.stopPropagation()
+                      store.selectMandatoryDot(synthFact.id, mandatoryDisplayRole)
+                      onContextMenu?.(synthFact.id, mandatoryDisplayRole, e)
+                    }}/>
+                  <rect className="hover-ring"
+                    x={pos.x - DOT_R - 3} y={pos.y - DOT_R - 3}
+                    width={(DOT_R + 3) * 2} height={(DOT_R + 3) * 2}
+                    rx={DOT_R + 3}/>
+                </g>
+              )
+            }
+          }
+
+          return results
+        }).flat().filter(Boolean)
       })}
     </g>
   )

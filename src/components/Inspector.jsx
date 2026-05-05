@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useLayoutEffect, useEffect } from 'react'
 import { useOrmStore } from '../store/ormStore'
-import { getDisplayReading } from './FactTypeNode'
+import { getDisplayReading, makeImplicitLinkFact } from './FactTypeNode'
 import { RingMiniSymbol } from './ConstraintNodes'
 import { formatValueRange, formatCardinalityRange, formatFrequencyRange } from './ObjectTypeNode'
 import { PROFILES, PROFILE_MAP, getDatatypeById } from '../data/datatypeProfiles'
@@ -126,10 +126,14 @@ function Row({ children }) { return <div style={{ marginBottom: 8 }}>{children}<
 // ── Diagrams-containing list ─────────────────────────────────────────────────
 // Shows which diagrams contain the given element, in tab order.
 // subtypeEndpointIds: [subId, superId] — for subtypes both endpoints must be in the diagram.
-function DiagramList({ elementId, kind, subtypeEndpointIds }) {
+function DiagramList({ elementId, kind, subtypeEndpointIds, factId, roleIndex }) {
   const store = useOrmStore()
   const { diagrams } = store
+  const isImplicitLink = kind === 'implicitLink' && factId != null && roleIndex != null
   const containing = diagrams.filter(d => {
+    if (isImplicitLink) {
+      return (d.shownImplicitLinks || []).includes(`${factId}:${roleIndex}`)
+    }
     if (subtypeEndpointIds) {
       const [a, b] = subtypeEndpointIds
       return d.elementIds === null ||
@@ -139,7 +143,11 @@ function DiagramList({ elementId, kind, subtypeEndpointIds }) {
   })
   const handleClick = (d) => {
     store.setActiveDiagram(d.id)
-    store.select(elementId, kind)
+    if (isImplicitLink) {
+      store.selectImplicitLink(factId, roleIndex)
+    } else {
+      store.select(elementId, kind)
+    }
   }
   return (
     <Row>
@@ -513,7 +521,58 @@ function RangeChip({ range, onClick, format = formatValueRange }) {
         background: 'var(--bg-raised)', border: '1px solid var(--border-soft)',
         borderRadius: 3 }}>
       <span style={{ flex: 1 }}>{summary}</span>
-      <span style={{ fontSize: 10, color: 'var(--accent)', flexShrink: 0 }}>→</span>
+      <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--accent)', flexShrink: 0, lineHeight: 1 }}>→</span>
+    </div>
+  )
+}
+
+// ── Base role chip — links to the base role of an implicit link ──────────────
+function BaseRoleChip({ parentFact, roleIndex }) {
+  const store = useOrmStore()
+  const otMap = Object.fromEntries(store.objectTypes.map(o => [o.id, o]))
+  const factMap = Object.fromEntries(store.facts.filter(f => f.objectified).map(f => [f.id, f]))
+
+  const playerName = (playerId) => {
+    if (!playerId) return '?'
+    const ot = otMap[playerId]
+    if (ot) return ot.name
+    const nf = factMap[playerId]
+    if (nf?.objectified) return nf.objectifiedName || '(unnamed)'
+    return '?'
+  }
+
+  const n = parentFact.arity
+  const parts = parentFact.readingParts || []
+  const tokens = []
+  for (let i = 0; i <= n; i++) {
+    const text = (parts[i] || '').trim()
+    if (text) tokens.push({ kind: 'text', value: text })
+    if (i < n) tokens.push({ kind: 'ot', roleIndex: i, value: playerName(parentFact.roles[i]?.objectTypeId) })
+  }
+
+  return (
+    <div onClick={() => store.selectRole(parentFact.id, roleIndex)}
+      style={{ display: 'flex', alignItems: 'center', gap: 5,
+        fontSize: 12, color: 'var(--ink-2)',
+        cursor: 'pointer', padding: '3px 8px',
+        background: 'var(--bg-raised)', border: '1px solid var(--border-soft)',
+        borderRadius: 3 }}>
+      <span style={{ flex: 1 }}>
+        {tokens.length === 0
+          ? <span style={{ color: '#2a7a2a' }}>{parentFact.reading || parentFact.id}</span>
+          : tokens.map((tok, i) => (
+              <React.Fragment key={i}>
+                {i > 0 && ' '}
+                {tok.kind === 'ot'
+                  ? <span style={{ color: '#7c4dbd', fontWeight: 600, background: tok.roleIndex === roleIndex ? '#f5efb8' : 'none', borderRadius: 2, padding: tok.roleIndex === roleIndex ? '0 2px' : 0 }}>{tok.value}</span>
+                  : <span style={{ color: '#2a7a2a' }}>{tok.value}</span>
+                }
+              </React.Fragment>
+            ))
+        }
+        {' '}<span style={{ color: 'var(--ink-muted)', fontWeight: 400 }}>({roleIndex + 1})</span>
+      </span>
+      <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--accent)', flexShrink: 0, lineHeight: 1 }}>→</span>
     </div>
   )
 }
@@ -653,24 +712,47 @@ function UniquenessBarInspector({ fact, uIndex }) {
   const u = fact.uniqueness[uIndex]
   if (!u) return null
 
+  const isImplicit = fact._implicit === true
+  const parentFact = isImplicit ? store.facts.find(f => f.id === fact._parentFactId) : null
+  const implicitLink = isImplicit && parentFact ? parentFact.implicitLinks?.find(il => il.roleIndex === fact._implicitRoleIndex) : null
+
   const otMap      = Object.fromEntries(store.objectTypes.map(o => [o.id, o]))
   const nestedMap  = Object.fromEntries(store.facts.filter(f => f.objectified).map(f => [f.id, f]))
   const sortedKey  = JSON.stringify([...u].sort())
-  const isPreferred = fact.preferredUniqueness != null &&
-    JSON.stringify([...fact.preferredUniqueness].sort()) === sortedKey
-  const reading = getDisplayReading(fact) || null
+
+  let isPreferred, canBePreferred, reading
+  if (isImplicit) {
+    isPreferred = implicitLink?.preferredUniqueness ?? false
+    canBePreferred = true
+    reading = getDisplayReading(fact) || null
+  } else {
+    isPreferred = (fact.preferredUniqueness || []).some(pu =>
+      JSON.stringify([...pu].sort()) === sortedKey
+    )
+    canBePreferred = u.length === fact.arity - 1
+    reading = getDisplayReading(fact) || null
+  }
 
   const toggleRole = (ri) => {
+    if (isImplicit) return
     const next = u.includes(ri) ? u.filter(i => i !== ri) : [...u, ri]
-    if (next.length === 0) return   // must cover at least one role
+    if (next.length === 0) return
     store.updateUniquenessRoles(fact.id, uIndex, next)
+  }
+
+  const togglePreferred = () => {
+    if (isImplicit) {
+      store.updateImplicitLink(parentFact.id, fact._implicitRoleIndex, { preferredUniqueness: !isPreferred })
+    } else {
+      store.setPreferredUniqueness(fact.id, u)
+    }
   }
 
   return (
     <div style={{ marginBottom: 18 }}>
       <InspectorTitle>Internal Uniqueness</InspectorTitle>
       <div style={{ marginBottom: 10 }}>
-        <button onClick={() => store.select(fact.id, 'fact')}
+        <button onClick={() => isImplicit ? store.selectImplicitLink(parentFact.id, fact._implicitRoleIndex) : store.select(fact.id, 'fact')}
           style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer',
             color: 'var(--accent)', fontSize: 11 }}>
           ← {reading ?? 'Fact Type'}
@@ -689,7 +771,7 @@ function UniquenessBarInspector({ fact, uIndex }) {
               key={ri}
               label={`Role ${ri + 1}${player ? ` · ${player}` : ''}`}
               checked={checked}
-              disabled={isLast}
+              disabled={isImplicit || isLast}
               onChange={() => toggleRole(ri)}
             />
           )
@@ -699,14 +781,17 @@ function UniquenessBarInspector({ fact, uIndex }) {
         <Checkbox
           label="Preferred Identifier"
           checked={isPreferred}
-          onChange={() => store.setPreferredUniqueness(fact.id, u)}
+          disabled={!canBePreferred}
+          onChange={() => togglePreferred()}
         />
       </Row>
-      <div style={{ marginTop: 8 }}>
-        <DangerBtn onClick={() => { store.toggleUniqueness(fact.id, u); store.select(fact.id, 'fact') }}>
-          Delete
-        </DangerBtn>
-      </div>
+      {!isImplicit && (
+        <div style={{ marginTop: 8 }}>
+          <DangerBtn onClick={() => { store.toggleUniqueness(fact.id, u); store.select(fact.id, 'fact') }}>
+            Delete
+          </DangerBtn>
+        </div>
+      )}
     </div>
   )
 }
@@ -714,15 +799,18 @@ function UniquenessBarInspector({ fact, uIndex }) {
 // ── Internal Frequency Constraint inspector ───────────────────────────────────
 function InternalFrequencyInspector({ fact, ifItem }) {
   const store   = useOrmStore()
+  const isImplicit = fact._implicit === true
+  const parentFact = isImplicit ? store.facts.find(f => f.id === fact._parentFactId) : null
   const otMap   = Object.fromEntries(store.objectTypes.map(o => [o.id, o]))
   const nestedMap = Object.fromEntries(store.facts.filter(f => f.objectified).map(f => [f.id, f]))
   const reading = getDisplayReading(fact) || null
 
   const toggleRole = (ri) => {
+    if (isImplicit) return
     const next = ifItem.roles.includes(ri)
       ? ifItem.roles.filter(i => i !== ri)
       : [...ifItem.roles, ri]
-    if (next.length === 0) return   // must cover at least one role
+    if (next.length === 0) return
     store.updateInternalFrequency(fact.id, ifItem.id, { roles: next })
   }
 
@@ -730,7 +818,7 @@ function InternalFrequencyInspector({ fact, ifItem }) {
     <div style={{ marginBottom: 18 }}>
       <InspectorTitle>Frequency Range</InspectorTitle>
       <div style={{ marginBottom: 10 }}>
-        <button onClick={() => store.select(fact.id, 'fact')}
+        <button onClick={() => isImplicit ? store.selectImplicitLink(parentFact.id, fact._implicitRoleIndex) : store.select(fact.id, 'fact')}
           style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer',
             color: 'var(--accent)', fontSize: 11 }}>
           ← {reading ?? 'Fact Type'}
@@ -749,7 +837,7 @@ function InternalFrequencyInspector({ fact, ifItem }) {
               key={ri}
               label={`Role ${ri + 1}${player ? ` · ${player}` : ''}`}
               checked={checked}
-              disabled={isLast}
+              disabled={isImplicit || isLast}
               onChange={() => toggleRole(ri)}
             />
           )
@@ -763,12 +851,14 @@ function InternalFrequencyInspector({ fact, ifItem }) {
           onChange={vr => store.updateInternalFrequency(fact.id, ifItem.id, { range: vr })}
         />
       </Row>
-      <div style={{ marginTop: 8 }}>
-        <Label>Usage</Label>
-        <DangerBtn onClick={() => { store.removeInternalFrequency(fact.id, ifItem.id); store.select(fact.id, 'fact') }}>
-          Delete Frequency Range
-        </DangerBtn>
-      </div>
+      {!isImplicit && (
+        <div style={{ marginTop: 8 }}>
+          <Label>Usage</Label>
+          <DangerBtn onClick={() => { store.removeInternalFrequency(fact.id, ifItem.id); store.select(fact.id, 'fact') }}>
+            Delete Frequency Range
+          </DangerBtn>
+        </div>
+      )}
     </div>
   )
 }
@@ -1139,7 +1229,7 @@ function FactPresentationSubsection({ fact, store }) {
   return (
     <Section title="Presentation">
       <Row>
-        <Label>Role Box Order</Label>
+        <Label>Shown Role Box Order</Label>
         <select value={JSON.stringify(dro)} style={{ width: '100%' }}
           onChange={e => {
             const newOrder = JSON.parse(e.target.value)
@@ -1294,8 +1384,11 @@ function FactConstraintsSubsection({ fact, store }) {
         <div style={{ color: 'var(--ink-muted)', fontSize: 11, marginBottom: 8 }}>None defined</div>
       )}
       {fact.uniqueness.map((u, ui) => {
-        const isPreferred = fact.preferredUniqueness != null &&
-          JSON.stringify([...fact.preferredUniqueness].sort()) === JSON.stringify([...u].sort())
+        const uKey = JSON.stringify([...u].sort())
+        const isPreferred = (fact.preferredUniqueness || []).some(pu =>
+          JSON.stringify([...pu].sort()) === uKey
+        )
+        const canBePreferred = u.length === fact.arity - 1
         return (
           <div key={ui}
             onClick={() => store.selectUniqueness(fact.id, ui)}
@@ -1307,7 +1400,7 @@ function FactConstraintsSubsection({ fact, store }) {
             <span style={{ flex: 1 }}>Roles: {[...u].sort((a, b) => a - b).map(i => i + 1).join(', ')}</span>
             {isPreferred && <span title="Preferred Identifier"
               style={{ color: 'var(--col-mandatory)', fontSize: 11, flexShrink: 0 }}>★</span>}
-            <span style={{ fontSize: 10, color: 'var(--accent)', flexShrink: 0 }}>→</span>
+            <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--accent)', flexShrink: 0, lineHeight: 1 }}>→</span>
           </div>
         )
       })}
@@ -1362,7 +1455,7 @@ function FactConstraintsSubsection({ fact, store }) {
               Roles: {[...ifItem.roles].sort((a, b) => a - b).map(i => i + 1).join(', ')}
               {rangeText && <span style={{ color: 'var(--ink-muted)', marginLeft: 6 }}>Freq: {rangeText}</span>}
             </span>
-            <span style={{ fontSize: 10, color: 'var(--accent)', flexShrink: 0 }}>→</span>
+            <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--accent)', flexShrink: 0, lineHeight: 1 }}>→</span>
           </div>
         )
       })}
@@ -1579,6 +1672,12 @@ function ImplicitLinkRoleInspector({ parentFact, roleIndex, ilRoleIndex }) {
   const nf = !ot ? nestedMap[role.objectTypeId] : null
   const playerName = ot ? ot.name : nf ? nf.objectifiedName : '(unnamed)'
 
+  // Constraints inherited from the parent fact (only for role 0 of the implicit link)
+  const parentRoleIndex = srcIdx === 0 ? roleIndex : null
+  const parentRole = parentRoleIndex != null ? parentFact.roles[parentRoleIndex] : null
+  const parentUniqueness = parentFact.uniqueness || []
+  const parentFrequency = parentFact.internalFrequency || []
+
   return (
     <div style={{ marginBottom: 18 }}>
       <InspectorTitle>Role {ilRoleIndex + 1}</InspectorTitle>
@@ -1607,6 +1706,59 @@ function ImplicitLinkRoleInspector({ parentFact, roleIndex, ilRoleIndex }) {
             store.updateImplicitLink(parentFact.id, roleIndex, { roleNames })
           }}/>
       </Row>
+
+      <Section title="Constraints">
+        <Label>Participation</Label>
+        <div style={{ fontSize: 12, color: 'var(--ink-2)', padding: '4px 8px',
+          background: 'var(--bg-raised)', border: '1px solid var(--border-soft)', borderRadius: 4 }}>
+          {srcIdx === 0 ? 'Mandatory (default)' : parentFact.roles[roleIndex]?.mandatory ? 'Mandatory (propagated)' : 'Optional'}
+        </div>
+
+        {parentRole && parentUniqueness.length > 0 && parentUniqueness.some(u => u.includes(parentRoleIndex)) && (
+          <>
+            <Label style={{ marginTop: 8 }}>Parent Fact Uniqueness</Label>
+            {parentUniqueness.map((uRoles, ui) => {
+              if (!uRoles.includes(parentRoleIndex)) return null
+              const key = JSON.stringify([...uRoles].sort((a, b) => a - b))
+              const isPreferred = (parentFact.preferredUniqueness || []).some(pu =>
+                JSON.stringify([...pu].sort((a, b) => a - b)) === key
+              )
+              const formatRoles = (roles) => roles.map(r => `role ${r + 1}`).join(', ')
+              return (
+                <div key={ui} style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                  <span style={{ fontSize: 11, color: 'var(--ink-2)', flex: 1 }}>
+                    {formatRoles(uRoles)}
+                  </span>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 10, color: 'var(--ink-muted)', cursor: 'pointer' }}>
+                    <input type="checkbox"
+                      checked={isPreferred}
+                      onChange={() => store.togglePreferredUniqueness(parentFact.id, ui)}
+                      style={{ accentColor: 'var(--accent)' }}
+                    />
+                    Preferred
+                  </label>
+                </div>
+              )
+            })}
+          </>
+        )}
+
+        {parentRole && parentFrequency.length > 0 && parentFrequency.some(ifItem => ifItem.roles.includes(parentRoleIndex)) && (
+          <>
+            <Label style={{ marginTop: 8 }}>Parent Fact Frequency</Label>
+            {parentFrequency.map(ifItem => {
+              if (!ifItem.roles.includes(parentRoleIndex)) return null
+              const range = ifItem.range
+              const rangeText = range ? `${range.min === range.max ? range.min : `${range.min}..${range.max ?? '∞'}`}` : ''
+              return (
+                <div key={ifItem.id} style={{ fontSize: 11, color: 'var(--ink-2)', marginTop: 2 }}>
+                  {rangeText || '(unbounded)'}
+                </div>
+              )
+            })}
+          </>
+        )}
+      </Section>
     </div>
   )
 }
@@ -1661,6 +1813,9 @@ function CompactImplicitLinkRoleList({ parentFact, roleIndex }) {
                 fontStyle: 'italic', maxWidth: 60, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {role.roleName}
               </span>
+            )}
+            {(srcIdx === 0 || parentFact.roles[roleIndex]?.mandatory) && (
+              <span title="Mandatory" style={{ color: 'var(--col-constraint)', fontSize: 11, flexShrink: 0 }}>●</span>
             )}
           </div>
         )
@@ -1763,6 +1918,10 @@ function ImplicitLinkInspector({ parentFact, roleIndex }) {
     <div style={{ marginBottom: 18 }}>
       <InspectorTitle>Implicit Link: {nestedName} ↔ {playerName}</InspectorTitle>
 
+      <Section title="Base role in parent fact">
+        <BaseRoleChip parentFact={parentFact} roleIndex={roleIndex} />
+      </Section>
+
       <Section title="Roles">
         <CompactImplicitLinkRoleList parentFact={parentFact} roleIndex={roleIndex} />
       </Section>
@@ -1807,7 +1966,7 @@ function ImplicitLinkInspector({ parentFact, roleIndex }) {
 
       <Section title="Presentation">
         <Row>
-          <Label>Role Box Order</Label>
+          <Label>Shown Role Box Order</Label>
           <select value={JSON.stringify(mergedIl.roleOrder || [0, 1])} style={{ width: '100%' }}
             onChange={e => {
               const newOrder = JSON.parse(e.target.value)
@@ -1888,6 +2047,34 @@ function ImplicitLinkInspector({ parentFact, roleIndex }) {
             onChange={v => store.updateImplicitLink(parentFact.id, roleIndex, { uniquenessBelow: v })}
           />
         </Row>
+      </Section>
+
+      <Section title="Constraints">
+        <button onClick={() => store.selectImplicitLinkUniqueness(parentFact.id, roleIndex)}
+          style={{ width: '100%', padding: '6px 12px', fontSize: 12, background: 'var(--bg-raised)',
+            border: '1px solid var(--border-soft)', borderRadius: 4, cursor: 'pointer',
+            color: 'var(--ink-2)', textAlign: 'left', marginBottom: 6 }}>
+          Internal Uniqueness{il.preferredUniqueness ? ' (Preferred)' : ''}
+        </button>
+        <Label style={{ marginTop: 8 }}>Frequency</Label>
+        {(() => {
+          const frequency = []
+          return frequency.length === 0
+            ? <div style={{ fontSize: 11, color: 'var(--ink-muted)', fontStyle: 'italic' }}>None</div>
+            : frequency.map(ifItem => {
+                const range = ifItem.range
+                const rangeText = range ? `${range.min === range.max ? range.min : `${range.min}..${range.max ?? '∞'}`}` : ''
+                return (
+                  <div key={ifItem.id} style={{ fontSize: 11, color: 'var(--ink-2)', marginTop: 2 }}>
+                    {rangeText || '(unbounded)'}
+                  </div>
+                )
+              })
+        })()}
+      </Section>
+
+      <Section title="Usage">
+        <DiagramList kind="implicitLink" factId={parentFact.id} roleIndex={roleIndex} />
       </Section>
 
       <div style={{ marginTop: 8 }}>
@@ -2470,6 +2657,10 @@ export default function Inspector() {
     }
   }, [])
 
+  useEffect(() => {
+    store.setInspectorWidth(width)
+  }, [width])
+
   const ot  = store.objectTypes.find(o => o.id === selectedId)
   const rawFact = store.facts.find(f => f.id === selectedId)
   // Merge per-diagram position overrides so the inspector sees the same values as the canvas
@@ -2502,7 +2693,18 @@ export default function Inspector() {
   if (!selectedId && !roleFact) {
     if (selectedUniqueness) {
       const f = store.facts.find(f => f.id === selectedUniqueness.factId)
-      if (f) internalConstraintContent = <FactInspector fact={f} />
+      if (f) {
+        if (selectedUniqueness.roleIndex !== undefined) {
+          // Implicit link uniqueness
+          const il = f.implicitLinks?.find(il => il.roleIndex === selectedUniqueness.roleIndex)
+          if (il) {
+            const synth = makeImplicitLinkFact(f, il)
+            internalConstraintContent = <UniquenessBarInspector fact={synth} uIndex={0} />
+          }
+        } else {
+          internalConstraintContent = <FactInspector fact={f} />
+        }
+      }
     } else if (selectedMandatoryDot) {
       const factId = selectedMandatoryDot.factId
       const roleIndex = selectedMandatoryDot.roleIndex
@@ -2518,8 +2720,27 @@ export default function Inspector() {
       }
     } else if (selectedInternalFrequency) {
       const f = store.facts.find(f => f.id === selectedInternalFrequency.factId)
-      const ifItem = f ? (f.internalFrequency || []).find(x => x.id === selectedInternalFrequency.ifId) : null
-      if (f && ifItem) internalConstraintContent = <InternalFrequencyInspector fact={f} ifItem={ifItem} />
+      if (f) {
+        const ifItem = (f.internalFrequency || []).find(x => x.id === selectedInternalFrequency.ifId)
+        if (ifItem) internalConstraintContent = <InternalFrequencyInspector fact={f} ifItem={ifItem} />
+      } else {
+        // Check if it's an implicit link frequency constraint
+        const factId = selectedInternalFrequency.factId
+        if (factId.includes('_il_')) {
+          const parts = factId.split('_il_')
+          const parentFactId = parts[0]
+          const roleIndex = Number(parts[1].split('_')[0])
+          const parentFact = store.facts.find(f => f.id === parentFactId)
+          if (parentFact) {
+            const il = parentFact.implicitLinks?.find(l => l.roleIndex === roleIndex)
+            if (il) {
+              const synth = makeImplicitLinkFact(parentFact, il)
+              const ifItem = (synth.internalFrequency || []).find(x => x.id === selectedInternalFrequency.ifId)
+              if (ifItem) internalConstraintContent = <InternalFrequencyInspector fact={synth} ifItem={ifItem} />
+            }
+          }
+        }
+      }
     } else if (selectedValueRange) {
       internalConstraintContent = <ValueRangeConstraintInspector sel={selectedValueRange} />
     } else if (selectedCardinalityRange) {
@@ -2594,7 +2815,7 @@ export default function Inspector() {
       )}
 
       {!selectedId && store.multiSelectedIds.length === 0 && !internalConstraintContent && (
-        <div style={{ marginTop: 8 }}>
+      <div style={{ marginTop: 8 }}>
           <div style={{ fontSize: 10, color: 'var(--accent)', fontWeight: 700,
             letterSpacing: '0.1em', textTransform: 'uppercase',
             borderBottom: '1px solid var(--border-soft)', paddingBottom: 5, marginBottom: 12 }}>

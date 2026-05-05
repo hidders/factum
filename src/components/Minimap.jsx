@@ -16,11 +16,19 @@ export default function Minimap() {
   const [collapsed,  setCollapsed]  = useState(false)
   const [expandFrom, setExpandFrom] = useState(null)  // { x, y } pill coords held during expand start
   const [animating,  setAnimating]  = useState(false) // true while expand/collapse transition runs
+  const [winW, setWinW] = useState(window.innerWidth)
+  const [winH, setWinH] = useState(window.innerHeight)
   const animTimerRef = useRef(null)
 
   // ── drag-to-move state ────────────────────────────────────────────────────
   const dragRef  = useRef(null)
   const panelRef = useRef(null)
+
+  useEffect(() => {
+    const onResize = () => { setWinW(window.innerWidth); setWinH(window.innerHeight) }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
 
   const [parentSize, setParentSize] = useState({ w: 1200, h: 700 })
 
@@ -34,9 +42,9 @@ export default function Minimap() {
     return () => obs.disconnect()
   }, [])
 
-  const defaultX = window.innerWidth - MM_W - 250   // leave room for inspector (240px) + gap
+  const defaultX = winW - MM_W - 250   // leave room for inspector (240px) + gap
   // Sit above the pill row (status bar 26px + gap 8px + pill HDR_H) with an 8px gap
-  const pillRowTop = window.innerHeight - 26 - 8 - HDR_H
+  const pillRowTop = winH - 26 - 8 - HDR_H
   const defaultY = pillRowTop - MM_H - HDR_H - 8
 
   const posX = store.minimapPos.x ?? defaultX
@@ -148,9 +156,9 @@ export default function Minimap() {
   const panelH = collapsed ? HDR_H     : MM_H + HDR_H + 2
   const panelR = collapsed ? HDR_H / 2 : 6
 
-  // Fixed pill anchor: just above the status bar (26px), to the left of the inspector
-  const pillLeft = window.innerWidth  - 258 - PILL_W
-  const pillTop  = window.innerHeight - 26 - 8 - HDR_H
+  const inspectorWidth = store.inspectorWidth
+  const pillLeft = winW - inspectorWidth - 6 - PILL_W
+  const pillTop  = winH - 26 - 8 - HDR_H
   const displayLeft = expandFrom?.x ?? (collapsed ? pillLeft : posX)
   const displayTop  = expandFrom?.y ?? (collapsed ? pillTop  : posY)
 

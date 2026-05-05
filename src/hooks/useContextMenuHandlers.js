@@ -288,15 +288,15 @@ export function useContextMenuHandlers(store, setContextMenu, setVrPopup) {
     e.stopPropagation()
     const uRoles = fact.uniqueness[ui]
     if (!uRoles) return
-    const prefKey = fact.preferredUniqueness
-      ? JSON.stringify([...fact.preferredUniqueness].sort((a, b) => a - b))
-      : null
-    const isPreferred = prefKey !== null &&
-      JSON.stringify([...uRoles].sort((a, b) => a - b)) === prefKey
+    const uKey = JSON.stringify([...uRoles].sort((a, b) => a - b))
+    const isPreferred = (fact.preferredUniqueness || []).some(pu =>
+      JSON.stringify([...pu].sort((a, b) => a - b)) === uKey
+    )
+    const canBePreferred = uRoles.length === fact.arity - 1
     setContextMenu({
       x: e.clientX, y: e.clientY,
       items: [
-        { label: 'Is Preferred', checked: isPreferred,
+        { label: 'Is Preferred', checked: isPreferred, disabled: !canBePreferred,
           action: () => store.setPreferredUniqueness(fact.id, uRoles) },
         '---',
         { label: 'Change into Internal Frequency Constraint',

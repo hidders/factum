@@ -5,6 +5,7 @@ import { roleCenter, nestedFactBounds, ROLE_H, displayRoleOrder } from './FactTy
 import { roleAnchor } from './RoleConnectors'
 import { entityBounds, formatValueRange } from './ObjectTypeNode'
 import { EXTERNAL_CONSTRAINT_TYPES } from '../constants.js'
+import { isSelectionMode, isElementSelecting } from '../utils/cursorUtils'
 
 const CONSTRAINT_R = 14        // radius of standard constraint circle
 const EXTERNAL_CONSTRAINT_R = 8 // radius of external constraint circle (2× mandatory dot)
@@ -806,7 +807,7 @@ export default function ConstraintNodes({ onDragStart, mousePos, onContextMenu }
             onMouseDown={(e) => {
               e.stopPropagation()
               if (e.button !== 0 || e.detail >= 2) return  // skip second click of double-click
-              if (store.tool === 'addConstraint:valueRange') { store.setTool('select'); return }
+              if (store.tool === 'addConstraint:valueRange' || store.tool === 'addConstraint:cardinality') { store.setTool('select'); return }
               if (isConnectTool) {
                 store.select(c.id, 'constraint')
                 store.startSequenceConstruction(c.id, 'newSequence')
@@ -822,7 +823,7 @@ export default function ConstraintNodes({ onDragStart, mousePos, onContextMenu }
                 }
                 return
               }
-              if (store.tool === 'assignRole' || store.tool === 'addSubtype' || store.tool === 'toggleMandatory' || store.tool === 'addInternalUniqueness') { store.setTool('select'); return }
+              if (store.tool === 'assignRole' || store.tool === 'addSubtype' || store.tool === 'toggleMandatory' || store.tool === 'addInternalUniqueness' || store.tool === 'addInternalFrequency') { store.setTool('select'); return }
               if (e.shiftKey) {
                 store.shiftSelect(c.id)
                 return
@@ -853,7 +854,15 @@ export default function ConstraintNodes({ onDragStart, mousePos, onContextMenu }
               store.startSequenceConstruction(c.id, 'newSequence')
             }}
             onContextMenu={(e) => onContextMenu(c, e)}
-            style={{ cursor: (isConnectTool || (isTargetTool && !targetDraftActive && TARGET_TYPES.has(c.constraintType))) ? 'cell' : 'grab' }}
+            style={{ cursor: (() => {
+              if (isElementSelecting(store.tool, store.sequenceConstruction)) {
+                if (store.sequenceConstruction) return 'not-allowed'
+                if (isConnectTool) return 'pointer'
+                if (isTargetTool && !targetDraftActive && TARGET_TYPES.has(c.constraintType)) return 'pointer'
+                return 'not-allowed'
+              }
+              return (isConnectTool || (isTargetTool && !targetDraftActive && TARGET_TYPES.has(c.constraintType))) ? 'cell' : 'grab'
+            })() }}
             filter={isSelected ? 'url(#selectGlow)' : undefined}
           >
             {arcs}

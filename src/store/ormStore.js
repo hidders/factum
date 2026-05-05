@@ -61,14 +61,15 @@ const mkFact = (x, y, arity = 2) => ({
   readingDisplay: 'forward',
   shownReadingOrder: null,
   uniqueness: [],
-  preferredUniqueness: null,
+  preferredUniqueness: [],
   internalFrequency: [],
   orientation: 'horizontal',
   readingOffsetAbove: null,
   readingOffsetBelow: null,
   readingAbove: false,
   uniquenessBelow: false,
-  implicitLinks: [], // [{ roleIndex, visible, x, y, readingParts, alternativeReadings, readingDisplay, orientation, readingOffsetAbove, readingOffsetBelow, readingAbove }]
+  preferredUniqueness: false,
+  implicitLinks: [], // [{ roleIndex, visible, x, y, readingParts, alternativeReadings, readingDisplay, orientation, readingOffsetAbove, readingOffsetBelow, readingAbove, preferredUniqueness }]
 })
 
 const mkSubtype = (subId, superId) => ({
@@ -359,6 +360,8 @@ export const useOrmStore = create((set, get) => ({
   // Position of the minimap panel in screen px from top-left of canvas container
   minimapPos: { x: null, y: null },  // null = default (bottom-right corner)
 
+  inspectorWidth: 240,
+
   clipboard: null,  // { objectTypes[], facts[], constraints[], subtypes[] } | null
 
   // ── clipboard ──────────────────────────────────────────────────────────
@@ -545,6 +548,7 @@ export const useOrmStore = create((set, get) => ({
   setShowSequenceMembership(val)    { set({ showSequenceMembership: val }) },
   setShowMinimap(val)         { set({ showMinimap: val }) },
   setMinimapPos(x, y)         { set({ minimapPos: { x, y } }) },
+  setInspectorWidth(w)        { set({ inspectorWidth: w }) },
 
   setDiagramProfile(profileId) {
     set(s => ({
@@ -592,20 +596,33 @@ export const useOrmStore = create((set, get) => ({
           linkReadingReverseParts: r.linkReadingReverseParts ?? null,
         })),
         implicitLinks: ((f.implicitLinks && f.implicitLinks.length > 0 ? f.implicitLinks : null) || (f.objectified
-          ? Array.from({ length: (f.roles || []).length }, (_, i) => ({ roleIndex: i, x: null, y: null, readingParts: ['', 'involves', ''], alternativeReadings: [{ roleOrder: [1, 0], parts: ['', 'is involved in', ''] }], readingDisplay: 'forward', orientation: 'horizontal', readingOffsetAbove: null, readingOffsetBelow: null, readingAbove: false, roleNames: [null, null] }))
+          ? Array.from({ length: (f.roles || []).length }, (_, i) => ({ roleIndex: i, x: null, y: null, readingParts: ['', 'involves', ''], alternativeReadings: [{ roleOrder: [1, 0], parts: ['', 'is involved in', ''] }], readingDisplay: 'forward', orientation: 'horizontal', readingOffsetAbove: null, readingOffsetBelow: null, readingAbove: false, roleNames: [null, null], preferredUniqueness: false }))
           : [])).map(il => ({
             ...il,
             alternativeReadings: il.alternativeReadings || [],
             readingDisplay: il.readingDisplay || 'forward',
             roleNames: il.roleNames || [null, null],
+            preferredUniqueness: il.preferredUniqueness ?? false,
           })),
         internalFrequency: (f.internalFrequency || []).map((if_, idx) => ({
           ...if_,
           x: if_.x ?? (f.x + 40 + idx * 20),
           y: if_.y ?? (f.y - 30),
         })),
+        // Migration: preferredUniqueness was a single array, now it's an array of arrays
+        preferredUniqueness: Array.isArray(f.preferredUniqueness)
+          ? (f.preferredUniqueness.length > 0 && Array.isArray(f.preferredUniqueness[0])
+            ? f.preferredUniqueness
+            : f.preferredUniqueness.length > 0
+              ? [f.preferredUniqueness]
+              : [])
+          : [],
       }
-    })
+    }).map(f => ({
+      ...f,
+      // Migration: remove preferred uniqueness constraints that don't cover exactly n-1 roles
+      preferredUniqueness: (f.preferredUniqueness || []).filter(pu => pu.length === f.arity - 1),
+    }))
     // Migrate old field names → new names
     const constraints = (d.constraints || []).map(c => {
       let out = c
@@ -774,7 +791,11 @@ export const useOrmStore = create((set, get) => ({
       diagrams: s.diagrams.map(d => ({
         ...d,
         elementIds: d.elementIds === null ? null : d.elementIds.filter(eid => eid !== id),
-        positions:  Object.fromEntries(Object.entries(d.positions).filter(([k]) => k !== id && !k.startsWith(`${id}:il:`))),
+        positions:  Object.fromEntries(Object.entries(d.positions).filter(([k]) => {
+          if (k === id) return false
+          if (k.startsWith(`${id}:il:`)) return false
+          return true
+        })),
       })),
         selectedId: s.selectedId === id ? null : s.selectedId,
         isDirty: true,
@@ -803,7 +824,7 @@ export const useOrmStore = create((set, get) => ({
     const n = nextRelationNumber(get().facts)
     const base = { ...mkFact(Math.round(x), Math.round(y), arity), readingParts: defaultReadingParts(arity, n), objectified: true, objectifiedKind, nestedReading: false, datatypeAssignment: null }
     base.roles = base.roles.map(r => ({ ...r, linkReadingParts: ['', 'involves', ''] }))
-    base.implicitLinks = Array.from({ length: arity }, (_, i) => ({ roleIndex: i, x: null, y: null, readingParts: ['', 'involves', ''], alternativeReadings: [{ roleOrder: [1, 0], parts: ['', 'is involved in', ''] }], readingDisplay: 'forward', orientation: 'horizontal', readingOffsetAbove: null, readingOffsetBelow: null, readingAbove: false, roleNames: [null, null] }))
+    base.implicitLinks = Array.from({ length: arity }, (_, i) => ({ roleIndex: i, x: null, y: null, readingParts: ['', 'involves', ''], alternativeReadings: [{ roleOrder: [1, 0], parts: ['', 'is involved in', ''] }], readingDisplay: 'forward', orientation: 'horizontal', readingOffsetAbove: null, readingOffsetBelow: null, readingAbove: false, roleNames: [null, null], preferredUniqueness: false }))
     set(s => {
       const used = new Set(
         s.objectTypes.map(o => o.name).concat(s.facts.map(f => f.objectifiedName).filter(Boolean))
@@ -828,7 +849,7 @@ export const useOrmStore = create((set, get) => ({
     const n = nextRelationNumber(get().facts)
     const base = { ...mkFact(Math.round(x), Math.round(y), arity), readingParts: defaultReadingParts(arity, n), objectified: true, objectifiedKind: 'value', nestedReading: false, datatypeAssignment: null }
     base.roles = base.roles.map(r => ({ ...r, linkReadingParts: ['', 'involves', ''] }))
-    base.implicitLinks = Array.from({ length: arity }, (_, i) => ({ roleIndex: i, x: null, y: null, readingParts: ['', 'involves', ''], alternativeReadings: [{ roleOrder: [1, 0], parts: ['', 'is involved in', ''] }], readingDisplay: 'forward', orientation: 'horizontal', readingOffsetAbove: null, readingOffsetBelow: null, readingAbove: false, roleNames: [null, null] }))
+    base.implicitLinks = Array.from({ length: arity }, (_, i) => ({ roleIndex: i, x: null, y: null, readingParts: ['', 'involves', ''], alternativeReadings: [{ roleOrder: [1, 0], parts: ['', 'is involved in', ''] }], readingDisplay: 'forward', orientation: 'horizontal', readingOffsetAbove: null, readingOffsetBelow: null, readingAbove: false, roleNames: [null, null], preferredUniqueness: false }))
     set(s => {
       const used = new Set(
         s.objectTypes.filter(o => o.kind === 'value').map(o => o.name)
@@ -862,7 +883,7 @@ export const useOrmStore = create((set, get) => ({
           ...f, objectified: true, objectifiedKind: 'entity',
           objectifiedName: `Entity${n}`, nestedReading: false,
           roles: f.roles.map(r => ({ ...r, linkReadingParts: ['', 'involves', ''] })),
-          implicitLinks: Array.from({ length: f.arity }, (_, i) => ({ roleIndex: i, x: null, y: null, readingParts: ['', 'involves', ''], alternativeReadings: [{ roleOrder: [1, 0], parts: ['', 'is involved in', ''] }], readingDisplay: 'forward', orientation: 'horizontal', readingOffsetAbove: null, readingOffsetBelow: null, readingAbove: false, roleNames: [null, null] })),
+          implicitLinks: Array.from({ length: f.arity }, (_, i) => ({ roleIndex: i, x: null, y: null, readingParts: ['', 'involves', ''], alternativeReadings: [{ roleOrder: [1, 0], parts: ['', 'is involved in', ''] }], readingDisplay: 'forward', orientation: 'horizontal', readingOffsetAbove: null, readingOffsetBelow: null, readingAbove: false, roleNames: [null, null], preferredUniqueness: false })),
         }),
         isDirty: true,
       }
@@ -882,7 +903,7 @@ export const useOrmStore = create((set, get) => ({
           ...f, objectified: true, objectifiedKind: 'value',
           objectifiedName: `Value${n}`, nestedReading: false,
           roles: f.roles.map(r => ({ ...r, linkReadingParts: ['', 'involves', ''] })),
-          implicitLinks: Array.from({ length: f.arity }, (_, i) => ({ roleIndex: i, x: null, y: null, readingParts: ['', 'involves', ''], alternativeReadings: [{ roleOrder: [1, 0], parts: ['', 'is involved in', ''] }], readingDisplay: 'forward', orientation: 'horizontal', readingOffsetAbove: null, readingOffsetBelow: null, readingAbove: false, roleNames: [null, null] })),
+          implicitLinks: Array.from({ length: f.arity }, (_, i) => ({ roleIndex: i, x: null, y: null, readingParts: ['', 'involves', ''], alternativeReadings: [{ roleOrder: [1, 0], parts: ['', 'is involved in', ''] }], readingDisplay: 'forward', orientation: 'horizontal', readingOffsetAbove: null, readingOffsetBelow: null, readingAbove: false, roleNames: [null, null], preferredUniqueness: false })),
         }),
         isDirty: true,
       }
@@ -1038,7 +1059,7 @@ export const useOrmStore = create((set, get) => ({
           const existingIndices = new Set(implicitLinks.map(il => il.roleIndex))
           for (let i = current; i < newArity; i++) {
             if (!existingIndices.has(i)) {
-              implicitLinks.push({ roleIndex: i, x: null, y: null, readingParts: ['', 'involves', ''], alternativeReadings: [{ roleOrder: [1, 0], parts: ['', 'is involved in', ''] }], readingDisplay: 'forward', orientation: 'horizontal', readingOffsetAbove: null, readingOffsetBelow: null, readingAbove: false })
+              implicitLinks.push({ roleIndex: i, x: null, y: null, readingParts: ['', 'involves', ''], alternativeReadings: [{ roleOrder: [1, 0], parts: ['', 'is involved in', ''] }], readingDisplay: 'forward', orientation: 'horizontal', readingOffsetAbove: null, readingOffsetBelow: null, readingAbove: false, preferredUniqueness: false })
             }
           }
         } else {
@@ -1137,6 +1158,12 @@ export const useOrmStore = create((set, get) => ({
           if (newRi !== undefined && newRi !== ri) {
             positions[`${factId}:il:${newRi}`] = positions[k]
             delete positions[k]
+            // Remap implied frequency positions
+            for (const fk of ilKeys.filter(x => x.startsWith(`${factId}:il:${ri}:if:`))) {
+              const newFk = fk.replace(`${factId}:il:${ri}:if:`, `${factId}:il:${newRi}:if:`)
+              positions[newFk] = positions[fk]
+              delete positions[fk]
+            }
           }
         }
         // Also remap shownImplicitLinks keys
@@ -1218,7 +1245,7 @@ export const useOrmStore = create((set, get) => ({
             readingParts: ['', 'involves', ''],
             alternativeReadings: [{ roleOrder: [1, 0], parts: ['', 'is involved in', ''] }],
             readingDisplay: 'forward', orientation: 'horizontal', readingOffsetAbove: null, readingOffsetBelow: null, readingAbove: false,
-            roleNames: [null, null],
+            roleNames: [null, null], preferredUniqueness: false,
           }]
         }
 
@@ -1242,6 +1269,11 @@ export const useOrmStore = create((set, get) => ({
             if (ri >= atIndex) {
               positions[`${factId}:il:${ri + 1}`] = positions[k]
               delete positions[k]
+              // Remap implied frequency positions
+              for (const fk of Object.keys(positions).filter(x => x.startsWith(`${factId}:il:${ri}:if:`))) {
+                positions[fk.replace(`${factId}:il:${ri}:if:`, `${factId}:il:${ri + 1}:if:`)] = positions[fk]
+                delete positions[fk]
+              }
             }
           }
           // Also remap shownImplicitLinks keys
@@ -1306,7 +1338,11 @@ export const useOrmStore = create((set, get) => ({
         diagrams: s.diagrams.map(d => {
           const positions = { ...d.positions }
           const ilKey = `${factId}:il:${roleIndex}`
+          // Remove the deleted implicit link's position and its implied frequency positions
           delete positions[ilKey]
+          for (const k of Object.keys(positions)) {
+            if (k.startsWith(`${ilKey}:if:`)) delete positions[k]
+          }
           for (const [k, v] of Object.entries(positions)) {
             if (k.startsWith(`${factId}:il:`)) {
               const parts = k.split(':')
@@ -1315,6 +1351,14 @@ export const useOrmStore = create((set, get) => ({
                 const newKey = `${factId}:il:${ri - 1}`
                 positions[newKey] = v
                 delete positions[k]
+                // Remap implied frequency positions too
+                for (const fk of Object.keys(positions)) {
+                  if (fk.startsWith(`${factId}:il:${ri}:if:`)) {
+                    const newFk = fk.replace(`${factId}:il:${ri}:if:`, `${factId}:il:${ri - 1}:if:`)
+                    positions[newFk] = positions[fk]
+                    delete positions[fk]
+                  }
+                }
               }
             }
           }
@@ -1386,10 +1430,10 @@ export const useOrmStore = create((set, get) => ({
         const uniqueness = exists
           ? f.uniqueness.filter(u => JSON.stringify([...u].sort()) !== key)
           : [...f.uniqueness, roleIndices].sort((a, b) => a.length - b.length)
-        const preferredUniqueness = exists && f.preferredUniqueness &&
-          JSON.stringify([...f.preferredUniqueness].sort()) === key
-          ? null : f.preferredUniqueness
-        return { ...f, uniqueness, preferredUniqueness }
+        const preferredUniqueness = (f.preferredUniqueness || []).filter(pu =>
+          JSON.stringify([...pu].sort()) !== key
+        )
+        return { ...f, uniqueness, preferredUniqueness: preferredUniqueness.length > 0 ? preferredUniqueness : [] }
       }),
       isDirty: true,
     }))
@@ -1400,10 +1444,15 @@ export const useOrmStore = create((set, get) => ({
     set(s => ({
       facts: s.facts.map(f => {
         if (f.id !== factId) return f
-        const currentKey = f.preferredUniqueness
-          ? JSON.stringify([...f.preferredUniqueness].sort())
-          : null
-        return { ...f, preferredUniqueness: currentKey === key ? null : [...roleIndices] }
+        if (roleIndices.length !== f.arity - 1) {
+          return { ...f, preferredUniqueness: (f.preferredUniqueness || []).filter(pu => JSON.stringify([...pu].sort()) !== key) }
+        }
+        const current = f.preferredUniqueness || []
+        const exists = current.some(pu => JSON.stringify([...pu].sort()) === key)
+        const preferredUniqueness = exists
+          ? current.filter(pu => JSON.stringify([...pu].sort()) !== key)
+          : [...current, [...roleIndices]]
+        return { ...f, preferredUniqueness }
       }),
       isDirty: true,
     }))
@@ -1520,8 +1569,25 @@ export const useOrmStore = create((set, get) => ({
     set({ selectedId: factId, selectedKind: 'implicitLink', selectedImplicitRole: roleIndex, selectedRole: null, selectedUniqueness: null, selectedImplicitLinkRole: null })
   },
 
+  selectImplicitLinkUniqueness(factId, roleIndex) {
+    set({ selectedId: null, selectedKind: null, selectedImplicitRole: null, selectedRole: null, selectedUniqueness: { factId, roleIndex, uIndex: 0 }, selectedImplicitLinkRole: null })
+  },
+
   selectImplicitLinkRole(factId, roleIndex, ilRoleIndex) {
     set({ selectedId: factId, selectedKind: 'implicitLink', selectedImplicitRole: roleIndex, selectedImplicitLinkRole: { factId, roleIndex, ilRoleIndex }, selectedRole: null, selectedUniqueness: null })
+  },
+
+  updateImplicitLinkInternalFrequency(factId, roleIndex, origIfId, patch) {
+    set(s => {
+      const key = `${factId}:il:${roleIndex}:if:${origIfId}`
+      const diag = s.diagrams.find(d => d.id === s.activeDiagramId)
+      const positions = { ...(diag?.positions || {}) }
+      positions[key] = { ...(positions[key] || {}), ...patch }
+      return {
+        diagrams: s.diagrams.map(d => d.id === s.activeDiagramId ? { ...d, positions } : d),
+        isDirty: true,
+      }
+    })
   },
 
   deleteFact(id) {
@@ -1628,6 +1694,12 @@ export const useOrmStore = create((set, get) => ({
   },
 
   collectSequenceMember(member) {
+    // Implicit link facts: only role 0 can be used in external constraint sequences
+    if (member.kind === 'role' && member.factId.includes('_il_')) {
+      const parts = member.factId.split('_il_')
+      if (parts.length === 2 && member.roleIndex !== 0) return
+    }
+
     const gc = get().sequenceConstruction
     if (!gc || gc.steps.length === 0) return
 
@@ -1776,6 +1848,7 @@ export const useOrmStore = create((set, get) => ({
   },
 
   addRoleToConstraintSequence(constraintId, sequenceIndex, factId, roleIndex) {
+    if (factId.includes('_il_') && roleIndex !== 0) return
     set(s => ({
       constraints: s.constraints.map(c => {
         if (c.id !== constraintId) return c
@@ -2033,7 +2106,14 @@ export const useOrmStore = create((set, get) => ({
           ...d,
           elementIds: d.elementIds === null ? null : d.elementIds.filter(id => !otIds.has(id) && !factIds.has(id) && !conIds.has(id)),
           positions:  Object.fromEntries(
-            Object.entries(d.positions).filter(([k]) => !otIds.has(k) && !factIds.has(k) && !conIds.has(k) && !ilPosKeysToRemove.has(k))
+            Object.entries(d.positions).filter(([k]) => {
+              if (otIds.has(k) || factIds.has(k) || conIds.has(k) || ilPosKeysToRemove.has(k)) return false
+              // Remove implied frequency constraint positions for deleted implicit links
+              for (const ilKey of ilKeysToRemove) {
+                if (k.startsWith(`${ilKey}:if:`)) return false
+              }
+              return true
+            })
           ),
           shownImplicitLinks: (d.shownImplicitLinks || []).filter(ilKey => !ilKeysToRemove.has(ilKey)),
         })),
@@ -2140,19 +2220,13 @@ export const useOrmStore = create((set, get) => ({
   addUniquenessBar(factId) {
     const fact = get().facts.find(f => f.id === factId)
     if (!fact) return
-    // Default to all roles; if that already exists, try first role only
-    const allRoles = fact.roles.map((_, i) => i)
-    const allKey   = JSON.stringify([...allRoles].sort((a, b) => a - b))
-    const hasAll   = fact.uniqueness.some(u => JSON.stringify([...u].sort((a, b) => a - b)) === allKey)
-    const newRoles = hasAll ? [0] : allRoles
-    const newKey   = JSON.stringify([...newRoles].sort((a, b) => a - b))
-    const hasDup   = fact.uniqueness.some(u => JSON.stringify([...u].sort((a, b) => a - b)) === newKey)
-    if (hasDup) return
+    const newRoles = []
+    const hasEmpty = fact.uniqueness.some(u => u.length === 0)
+    if (hasEmpty) return
     get().toggleUniqueness(factId, newRoles)
     const updated = get().facts.find(f => f.id === factId)
     if (!updated) return
-    const newIdx = updated.uniqueness.findIndex(u =>
-      JSON.stringify([...u].sort((a, b) => a - b)) === newKey)
+    const newIdx = updated.uniqueness.findIndex(u => u.length === 0)
     if (newIdx >= 0) get().selectUniqueness(factId, newIdx)
   },
   addInternalFrequencyBar(factId) {
@@ -2313,14 +2387,22 @@ export const useOrmStore = create((set, get) => ({
     }))
   },
   removeInternalFrequency(factId, ifId) {
-    set(s => ({
-      facts: s.facts.map(f => f.id !== factId ? f : {
-        ...f,
-        internalFrequency: (f.internalFrequency || []).filter(i => i.id !== ifId),
-      }),
-      selectedInternalFrequency: null,
-      isDirty: true,
-    }))
+    set(s => {
+      const fact = s.facts.find(f => f.id === factId)
+      const ilKeysToRemove = (fact?.implicitLinks || []).map(il => `${factId}:il:${il.roleIndex}:if:${ifId}`)
+      return {
+        facts: s.facts.map(f => f.id !== factId ? f : {
+          ...f,
+          internalFrequency: (f.internalFrequency || []).filter(i => i.id !== ifId),
+        }),
+        diagrams: s.diagrams.map(d => ({
+          ...d,
+          positions: Object.fromEntries(Object.entries(d.positions).filter(([k]) => !ilKeysToRemove.includes(k))),
+        })),
+        selectedInternalFrequency: null,
+        isDirty: true,
+      }
+    })
   },
 
   convertFrequencyToUniqueness(factId, ifId) {
@@ -2361,12 +2443,13 @@ export const useOrmStore = create((set, get) => ({
       facts: s.facts.map(f => {
         if (f.id !== factId) return f
         const uniqueness = f.uniqueness.filter(u => JSON.stringify([...u].sort((a, b) => a - b)) !== key)
-        const preferredUniqueness = f.preferredUniqueness &&
-          JSON.stringify([...f.preferredUniqueness].sort((a, b) => a - b)) === key ? null : f.preferredUniqueness
+        const preferredUniqueness = (f.preferredUniqueness || []).filter(pu =>
+          JSON.stringify([...pu].sort((a, b) => a - b)) !== key
+        )
         return {
           ...f,
           uniqueness,
-          preferredUniqueness,
+          preferredUniqueness: preferredUniqueness.length > 0 ? preferredUniqueness : [],
           internalFrequency: [...(f.internalFrequency || []), {
             id: ifId, roles: [...uRoles], range: [{ type: 'upper', upper: 1 }], x: factPos.x + 40, y: factPos.y - 30,
           }],
@@ -2646,7 +2729,13 @@ export const useOrmStore = create((set, get) => ({
         return {
           ...d,
           elementIds: base.filter(id => !allToRemove.has(id)),
-          positions:  Object.fromEntries(Object.entries(d.positions).filter(([k]) => !allToRemove.has(k) && !ilPosKeysToRemove.has(k))),
+          positions:  Object.fromEntries(Object.entries(d.positions).filter(([k]) => {
+            if (allToRemove.has(k) || ilPosKeysToRemove.has(k)) return false
+            for (const ilKey of ilKeysToRemove) {
+              if (k.startsWith(`${ilKey}:if:`)) return false
+            }
+            return true
+          })),
           shownImplicitLinks: (d.shownImplicitLinks || []).filter(ilKey => !ilKeysToRemove.has(ilKey)),
         }
       })

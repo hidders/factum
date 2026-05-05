@@ -3,6 +3,7 @@ import { useOrmStore } from '../store/ormStore'
 import { useDiagramElements } from '../hooks/useDiagramElements'
 import { entityBounds } from './ObjectTypeNode'
 import { nestedFactBounds } from './FactTypeNode'
+import { isSelectionMode, isElementSelecting } from '../utils/cursorUtils'
 
 function rectBorderPoint(b, tx, ty) {
   const cx = b.cx, cy = b.cy
@@ -75,12 +76,17 @@ export default function SubtypeArrows({ mousePos, onContextMenu }) {
                 store.collectSequenceMember({ kind: 'subtype', subtypeId: st.id })
                 return
               }
-              if (store.tool === 'assignRole' || store.tool === 'addSubtype' || store.tool === 'toggleMandatory' || store.tool === 'addInternalUniqueness') { store.setTool('select'); return }
+              if (store.tool === 'assignRole' || store.tool === 'addSubtype' || store.tool === 'toggleMandatory' || store.tool === 'addInternalUniqueness' || store.tool === 'addInternalFrequency' || store.tool === 'addConstraint:valueRange' || store.tool === 'addConstraint:cardinality') { store.setTool('select'); return }
               if (store.tool === 'connectConstraint') { store.clearSelection(); store.setTool('select'); return }
               if (e.shiftKey) { store.shiftSelect(st.id); return }
               store.select(st.id, 'subtype')
             }}
-            style={{ cursor: 'pointer' }}>
+            style={{ cursor: (() => {
+              if (store.sequenceConstruction) return 'pointer'
+              if (store.tool === 'connectConstraint') return 'pointer'
+              if (isSelectionMode(store.tool)) return 'not-allowed'
+              return 'pointer'
+            })() }}>
             {/* Inline filter defined before the element that uses it */}
             {filterProps && (
               <defs>

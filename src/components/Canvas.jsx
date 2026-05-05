@@ -12,6 +12,7 @@ import Minimap from './Minimap'
 import ContextMenu from './ContextMenu'
 import ConstraintMemberLabels from './ConstraintMemberLabels'
 import { ValueRangeEditor } from './Inspector'
+import { isSelectionMode, isElementSelecting } from '../utils/cursorUtils'
 
 const SNAP = 10  // grid snap in world units
 
@@ -265,6 +266,27 @@ export default function Canvas() {
     const isBackground = e.target === svgRef.current || e.target.closest('.canvas-bg')
     if (!isBackground) return
 
+    // Selection-mode tools: no panning, cancel on background click
+    if (isSelectionMode(store.tool)) {
+      if (e.button === 0) {
+        if (store.uniquenessConstruction) { store.abandonUniquenessConstruction() }
+        if (store.frequencyConstruction) { store.abandonFrequencyConstruction() }
+        if (store.sequenceConstruction) { store.abandonSequenceConstruction() }
+        if (store.linkDraft) { store.clearLinkDraft() }
+        store.setTool('select')
+        e.preventDefault()
+        return
+      }
+      return // ignore all other buttons in selection mode
+    }
+
+    // Sequence construction (from double-clicking constraint): cancel on background click
+    if (store.sequenceConstruction && e.button === 0) {
+      store.abandonSequenceConstruction()
+      e.preventDefault()
+      return
+    }
+
     // Middle-click → pan
     if (e.button === 1 || (e.button === 0 && spaceRef.current)) {
       e.preventDefault()
@@ -321,6 +343,9 @@ export default function Canvas() {
 
   // ── element drag start (called by child nodes) ──────────────────────────
   const handleDragStart = useCallback((id, kind, e) => {
+    // Selection-mode tools and sequence construction handle interactions in child components; prevent fallback dragging
+    if (isSelectionMode(store.tool) || store.sequenceConstruction) return
+
     // If we're in roleAssign mode and the drag starts on an object type,
     // start the link-draft rather than dragging the element.
     if (store.tool === 'assignRole' && kind !== 'fact' && kind !== 'constraint') {
@@ -541,10 +566,7 @@ export default function Canvas() {
   const cursor =
     dragState?.type === 'pan'          ? 'grabbing'
     : spaceDown                        ? 'grab'
-    : store.sequenceConstruction       ? 'crosshair'
-    : store.tool === 'connectConstraint' ? 'cell'
-    : store.tool === 'assignRole'      ? 'copy'
-    : store.tool === 'addSubtype'      ? 'cell'
+    : isElementSelecting(store.tool, store.sequenceConstruction) ? 'crosshair'
     : store.tool === 'select'
       ? (dragState?.type === 'band'         ? 'crosshair'
        : dragState?.type === 'multiElement' ? 'grabbing'

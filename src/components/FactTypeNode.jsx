@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useOrmStore } from '../store/ormStore'
 import { formatValueRange, formatCardinalityRange, formatFrequencyRange } from './ObjectTypeNode'
+import { isSelectionMode, isElementSelecting } from '../utils/cursorUtils'
 
 const VR_DEFAULT_OFFSET = { dx: 0, dy: -50 }
 const VR_FONT      = "'Segoe UI', Helvetica, Arial, sans-serif"
@@ -204,7 +205,7 @@ export function makeImplicitLinkFact(parentFact, implicitLink) {
   const roleNames = implicitLink.roleNames || [null, null]
   const roles = [
     { objectTypeId: nestedOtid, roleName: roleNames[0] || '', mandatory: true },
-    { objectTypeId: associatedOtid, roleName: roleNames[1] || '', mandatory: false },
+    { objectTypeId: associatedOtid, roleName: roleNames[1] || '', mandatory: !!role?.mandatory },
   ]
 
   const state = useOrmStore.getState()
@@ -231,6 +232,26 @@ export function makeImplicitLinkFact(parentFact, implicitLink) {
   const x = ilPos?.x ?? schemaX ?? defaultX
   const y = ilPos?.y ?? schemaY ?? defaultY
 
+  const hasSoloBaseRoleUniqueness = (parentFact.uniqueness || []).some(u => u.length === 1 && u[0] === implicitLink.roleIndex)
+  const propagatedUniqueness = hasSoloBaseRoleUniqueness ? [[0], [1]] : [[0]]
+
+  const propagatedFrequency = (parentFact.internalFrequency || [])
+    .filter(ifc => ifc.roles.length === 1 && ifc.roles[0] === implicitLink.roleIndex)
+    .map(ifc => {
+      const synthIfId = `${parentFact.id}_il_${implicitLink.roleIndex}_if_${ifc.id}`
+      const ifKey = `${parentFact.id}:il:${implicitLink.roleIndex}:if:${ifc.id}`
+      const ifPos = positions[ifKey] ?? {}
+      if (ifPos.x != null && ifPos.y != null) {
+        return { ...ifc, id: synthIfId, roles: [1], x: ifPos.x, y: ifPos.y, _origIfId: ifc.id }
+      }
+      // Default position: near the connector to the associated object type
+      const assocX = associatedOt?.x ?? associatedNf?.x ?? x
+      const assocY = associatedOt?.y ?? associatedNf?.y ?? y
+      const defX = Math.round((x + assocX) / 2)
+      const defY = Math.round((y + assocY) / 2)
+      return { ...ifc, id: synthIfId, roles: [1], x: defX, y: defY, _origIfId: ifc.id }
+    })
+
   return {
     id: `${parentFact.id}_il_${implicitLink.roleIndex}`,
     kind: 'fact',
@@ -250,9 +271,9 @@ export function makeImplicitLinkFact(parentFact, implicitLink) {
     shownReadingOrder: roleOrder,
     roleOrder: ilPos?.roleOrder || roleOrder,
     readingOrder: ilPos?.readingOrder || roleOrder,
-    uniqueness: [[0]],
-    preferredUniqueness: null,
-    internalFrequency: [],
+    uniqueness: propagatedUniqueness,
+    preferredUniqueness: [],
+    internalFrequency: propagatedFrequency,
     orientation: ilPos?.orientation ?? implicitLink.orientation ?? 'horizontal',
     readingOffsetAbove: ilPos?.readingOffsetAbove ?? implicitLink.readingOffsetAbove ?? null,
     readingOffsetBelow: ilPos?.readingOffsetBelow ?? implicitLink.readingOffsetBelow ?? null,
@@ -549,6 +570,12 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
     store.selectedImplicitLinkRole?.roleIndex === fact._implicitRoleIndex &&
     store.selectedImplicitLinkRole?.ilRoleIndex === ri
 
+  const isBaseRoleOfSelectedImplicitLink = (ri) =>
+    !fact._implicit && (
+      (store.selectedImplicitLinkRole?.factId === fact.id && store.selectedImplicitLinkRole?.roleIndex === ri) ||
+      (store.selectedKind === 'implicitLink' && store.selectedImplicitRole != null && store.selectedId === fact.id && store.selectedImplicitRole === ri)
+    )
+
   const handleRoleDoubleClick = useCallback((roleIndex, e) => {
     e.stopPropagation()
     if (fact._implicit) return
@@ -839,7 +866,11 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
       if (ifd) {
         const x = ifd.origX + (e.clientX - ifd.startX) / zoom
         const y = ifd.origY + (e.clientY - ifd.startY) / zoom
-        useOrmStore.getState().updateInternalFrequency(fact.id, ifd.ifId, { x, y })
+        if (fact._implicit) {
+          useOrmStore.getState().updateImplicitLinkInternalFrequency(fact._parentFactId, fact._implicitRoleIndex, ifd.origIfId, { x, y })
+        } else {
+          useOrmStore.getState().updateInternalFrequency(fact.id, ifd.ifId, { x, y })
+        }
         ifDragRef.current = null
         setIfLive(null)
       }
@@ -938,13 +969,21 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
     const parts = readingDraft.map(p => p.trim())
     while (parts.length < fact.arity + 1) parts.push('')
     parts.length = fact.arity + 1
-    if (editingReadingIsReverse) {
-      store.updateAlternativeReading(fact.id, [1, 0], parts)
+    if (fact._implicit) {
+      if (editingReadingIsReverse) {
+        store.updateImplicitLink(fact._parentFactId, fact._implicitRoleIndex, { alternativeReadings: [{ roleOrder: [1, 0], parts }] })
+      } else {
+        store.updateImplicitLink(fact._parentFactId, fact._implicitRoleIndex, { readingParts: parts })
+      }
     } else {
-      store.updateFact(fact.id, { readingParts: parts })
+      if (editingReadingIsReverse) {
+        store.updateAlternativeReading(fact.id, [1, 0], parts)
+      } else {
+        store.updateFact(fact.id, { readingParts: parts })
+      }
     }
     setEditingReading(false)
-  }, [readingDraft, editingReadingIsReverse, fact.arity, fact.id, store])
+  }, [readingDraft, editingReadingIsReverse, fact.arity, fact.id, fact._implicit, fact._parentFactId, fact._implicitRoleIndex, store])
 
   useEffect(() => {
     if (editingRefMode && refModeInputRef.current) {
@@ -985,13 +1024,13 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
   }, [editingRefMode, commitRefModeEdit])
 
   // Stage-1 frequency: tool is active but no construction started yet → fact is selectable candidate
-  const isFrequencyCandidate = isFrequencyTool && !store.frequencyConstruction
+  const isFrequencyCandidate = isFrequencyTool && !store.frequencyConstruction && !fact._implicit
   const roleStroke    = isFactSelected               ? 'var(--accent)'
-    : isUniquenessTool                               ? 'var(--col-candidate)'
+    : (isUniquenessTool && !fact._implicit)          ? 'var(--col-candidate)'
     : isFrequencyCandidate                           ? 'var(--col-candidate)'
     : (isDraftFrom && fact.objectified)              ? 'var(--col-subtype)'
     :                                                  'var(--col-fact)'
-  const roleStrokeW   = isFactSelected ? 2 : (isUniquenessTool || isFrequencyCandidate || (isDraftFrom && fact.objectified)) ? 2 : 1.5
+  const roleStrokeW   = isFactSelected ? 2 : ((isUniquenessTool && !fact._implicit) || isFrequencyCandidate || (isDraftFrom && fact.objectified)) ? 2 : 1.5
   const gc = store.sequenceConstruction
   const gcConstraint = gc ? store.constraints.find(c => c.id === gc.constraintId) : null
   const isVcConstruction = gcConstraint?.constraintType === 'valueComparison'
@@ -1009,13 +1048,35 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
     fact.roles.flatMap((role, ri) => isVrEligibleRole(role) ? [ri] : [])
   ) : null
 
-  const isRoleCandidate = (isAssignTool && !isAssigning) || store.tool === 'toggleMandatory' || isUniquenessTool
+   const isRoleCandidate = (isAssignTool && !isAssigning) || store.tool === 'toggleMandatory' || isUniquenessTool
     || isFrequencyCandidate  // stage 1: all facts' roles are candidate
     || (!!gc && !isVcConstruction)
+
   // Roles eligible for a value range constraint: connected to a value type or entity with a reference mode
   const vrEligibleRoles = isRoleValueTool ? new Set(
     fact.roles.flatMap((role, ri) => isVrEligibleRole(role) ? [ri] : [])
   ) : null
+  const getRoleCursor = (ri, roleSelected) => {
+    if (fact._implicit) {
+      return isElementSelecting(store.tool, store.sequenceConstruction) ? 'not-allowed' : 'grab'
+    }
+    if ((isSubtypeTool || isTargetTool) && fact.objectified) return 'cell'
+    if (isElementSelecting(store.tool, store.sequenceConstruction)) {
+      if (store.sequenceConstruction) return 'pointer'
+      if (store.tool === 'toggleMandatory') return 'pointer'
+      if (isUniquenessTool || isFrequencyTool) return 'pointer'
+      if (isRoleValueTool) return vrEligibleRoles.has(ri) ? 'pointer' : 'not-allowed'
+      if (isCrTool) return 'pointer'
+      if (isAssignTool) return 'pointer'
+      if (isSubtypeTool || isTargetTool) return fact.objectified ? 'pointer' : 'not-allowed'
+      if (store.tool === 'connectConstraint') return 'pointer'
+      return 'not-allowed'
+    }
+    if (isAssignTool || inConstruction || (!!store.sequenceConstruction && !isVcConstruction) || roleSelected) return 'crosshair'
+    if (isVcConstruction && !vcEligibleRoles.has(ri)) return 'not-allowed'
+    if (isVcConstruction) return 'crosshair'
+    return 'grab'
+  }
   const roleIsCandidate = (ri) => {
     if (fact._implicit) return false
     return isRoleCandidate || (isRoleValueTool && vrEligibleRoles.has(ri)) || (isVcConstruction && vcEligibleRoles.has(ri)) || isCrTool
@@ -1038,13 +1099,19 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
   const INSET = 2
   const FONT = "'Segoe UI', Helvetica, Arial, sans-serif"
   const barsBelow = !!fact.uniquenessBelow
-  const prefKey = fact.preferredUniqueness
-    ? JSON.stringify([...fact.preferredUniqueness].sort((a, b) => a - b))
-    : null
-  const pIdx = prefKey !== null
-    ? fact.uniqueness.findIndex(u => JSON.stringify([...u].sort((a, b) => a - b)) === prefKey)
-    : -1
-  const pLevel = pIdx >= 0 ? levels[pIdx] : -1
+  const preferredKeys = new Set((fact.preferredUniqueness || []).map(pu => JSON.stringify([...pu].sort((a, b) => a - b))))
+  if (fact._implicit) {
+    const il = store.facts.find(f => f.id === fact._parentFactId)?.implicitLinks?.find(il => il.roleIndex === fact._implicitRoleIndex)
+    if (il?.preferredUniqueness) {
+      fact.uniqueness.forEach(u => preferredKeys.add(JSON.stringify([...u].sort((a, b) => a - b))))
+    }
+  }
+  const pIndices = fact.uniqueness
+    .map((u, idx) => ({ idx, key: JSON.stringify([...u].sort((a, b) => a - b)) }))
+    .filter(({ key }) => preferredKeys.has(key))
+    .map(({ idx }) => idx)
+  const pLevels = pIndices.map(idx => levels[idx])
+  const minPLevel = pLevels.length > 0 ? Math.min(...pLevels) : -1
 
   // Bar coordinate helpers
   const barY_h = (level) => barsBelow
@@ -1054,8 +1121,8 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
   // Adjust barY to keep the preferred bar's inner line at the original position,
   // and shift bars further from role boxes (above the preferred) by the same amount.
   const adjustedBarY = (level, isThisPreferred) => {
-    if (pLevel < 0) return barY_h(level)
-    const isAbove = level > pLevel  // further from role boxes in both orientations
+    if (minPLevel < 0) return barY_h(level)
+    const isAbove = level > minPLevel  // further from role boxes in both orientations
     // Bars above shift by 2×PREF_OFFSET so their gap from the preferred outer line
     // equals the normal BAR_SPACING; the preferred bar itself shifts by 1×PREF_OFFSET.
     const shiftCount = (isAbove ? 2 : 0) + (isThisPreferred ? 1 : 0)
@@ -1101,8 +1168,8 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
 
   // Adjust barX similarly: inner line of preferred stays put; bars further away shift outward.
   const adjustedBarX = (level, isThisPreferred) => {
-    if (pLevel < 0) return barX_v(level)
-    const isAbove = level > pLevel
+    if (minPLevel < 0) return barX_v(level)
+    const isAbove = level > minPLevel
     const shiftCount = (isAbove ? 2 : 0) + (isThisPreferred ? 1 : 0)
     const dir = barsBelow ? -1 : 1  // barsBelow=false → bars right (+X); barsBelow=true → bars left (-X)
     return barX_v(level) + dir * PREF_OFFSET * shiftCount
@@ -1146,6 +1213,12 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
     }
     if (inConstruction && store.uniquenessConstruction?.uIndex === ui) {
       store.commitUniquenessConstruction()
+      return
+    }
+    if (fact._implicit) {
+      const alreadySelected = store.selectedUniqueness?.factId === fact._parentFactId && store.selectedUniqueness?.roleIndex === fact._implicitRoleIndex && store.selectedUniqueness?.uIndex === ui
+      if (alreadySelected) store.clearSelection()
+      else store.selectImplicitLinkUniqueness(fact._parentFactId, fact._implicitRoleIndex)
       return
     }
     const alreadySelected = store.selectedUniqueness?.factId === fact.id && store.selectedUniqueness?.uIndex === ui
@@ -1544,19 +1617,25 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
         filter="url(#sharedGlow)"
         style={{ pointerEvents: 'none' }}/>
     )}
-     {/* ── Main fact-type group (role boxes + bars + reading) ───────────────── */}
-     <g className="selectable-group" onMouseDown={handleMouseDown} onContextMenu={onContextMenu}
-       style={{ cursor: (() => {
-         if ((isSubtypeTool || isTargetTool) && fact.objectified) return 'cell'
-         if (isAssignTool && isAssigning && fact.objectified) return 'cell'
-         if (isRoleValueTool && fact.objectified) {
-           const canHaveVr = fact.objectifiedKind === 'value'
-             || (fact.objectifiedKind !== 'value' && fact.objectifiedRefMode && fact.objectifiedRefMode !== 'none')
-           return canHaveVr ? 'pointer' : 'not-allowed'
-         }
-         if (isCrTool && fact.objectified) return 'pointer'
-         return 'grab'
-       })() }}
+      {/* ── Main fact-type group (role boxes + bars + reading) ───────────────── */}
+      <g className="selectable-group" onMouseDown={handleMouseDown} onContextMenu={onContextMenu}
+        style={{ cursor: (() => {
+          if (fact._implicit) return 'grab'
+          if (isElementSelecting(store.tool, store.sequenceConstruction)) {
+            if (store.sequenceConstruction) return fact.objectified ? 'pointer' : 'not-allowed'
+            if (isUniquenessTool || isFrequencyTool) return 'pointer'
+            if (isCrTool) return fact.objectified ? 'pointer' : 'not-allowed'
+            if (isRoleValueTool) return fact.objectified ? 'pointer' : 'not-allowed'
+            if (store.tool === 'toggleMandatory') return 'not-allowed'
+            if (isSubtypeTool || isConnectorTool) return fact.objectified ? 'pointer' : 'not-allowed'
+            if (isAssignTool) return fact.objectified && store.linkDraft?.factId != null ? 'pointer' : 'not-allowed'
+            if (isTargetTool) return fact.objectified && store.linkDraft?.constraintId ? 'pointer' : 'not-allowed'
+            return 'not-allowed'
+          }
+          if ((isSubtypeTool || isTargetTool) && fact.objectified) return 'cell'
+          if (isAssignTool && isAssigning && fact.objectified) return 'cell'
+          return 'grab'
+        })() }}
        filter={isFactSelected || isDraftFrom ? 'url(#selectGlow)' : undefined}>
 
       {/* Hover ring for the whole fact type */}
@@ -2010,29 +2089,31 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
             {displayRoleOrder(fact).map((ri, pi) => {
              const role = fact.roles[ri]
              const ry = startY_v + pi * (ROLE_W + ROLE_GAP)
-             const roleSelected = isRoleSelected(ri) || isImplicitLinkRoleSelected(ri)
-             const isSimpleSelect = store.tool === 'select' && !store.sequenceConstruction && !inConstruction && !inFrequencyConstruction && !isAssignTool
-             return (
-                 <g key={role.id} className="role-box-group" filter={roleSelected ? 'url(#selectGlow)' : undefined}>
-                  <rect x={leftX_v} y={ry} width={ROLE_H} height={ROLE_W}
-                    fill={
-                      roleFirstDraft && store.linkDraft.roleIndex === ri ? '#e8e0f8'
-                      : inConstruction && ucRoles.includes(ri) ? '#dde8f5'
-                      : inFrequencyConstruction && fcRoles.includes(ri) ? '#dde8f5'
-                      : roleIsCandidate(ri) ? 'var(--fill-candidate)'
-                      : roleSelected ? '#ffffff'
-                      : highlightedRoles?.has(ri) ? '#fde3c8'
-                      : '#ffffff'
-                    }
-                    stroke={roleSelected ? 'var(--accent)' : roleIsCandidate(ri) ? 'var(--col-candidate)' : roleStroke}
-                    strokeWidth={roleSelected ? 2 : roleIsCandidate(ri) ? 2 : roleStrokeW}
+              const roleSelected = isRoleSelected(ri) || isImplicitLinkRoleSelected(ri)
+              const baseRoleOfIL = isBaseRoleOfSelectedImplicitLink(ri)
+              const isSimpleSelect = store.tool === 'select' && !store.sequenceConstruction && !inConstruction && !inFrequencyConstruction && !isAssignTool
+              return (
+                  <g key={role.id} className="role-box-group" filter={roleSelected ? 'url(#selectGlow)' : undefined}>
+                   <rect x={leftX_v} y={ry} width={ROLE_H} height={ROLE_W}
+                     fill={
+                       roleFirstDraft && store.linkDraft.roleIndex === ri ? '#e8e0f8'
+                       : inConstruction && ucRoles.includes(ri) ? '#dde8f5'
+                       : inFrequencyConstruction && fcRoles.includes(ri) ? '#dde8f5'
+                       : roleIsCandidate(ri) ? 'var(--fill-candidate)'
+                       : baseRoleOfIL ? '#dde8f5'
+                       : roleSelected ? '#ffffff'
+                       : highlightedRoles?.has(ri) ? '#fde3c8'
+                       : '#ffffff'
+                     }
+                     stroke={roleSelected ? 'var(--accent)' : baseRoleOfIL ? '#7a9bb5' : roleIsCandidate(ri) ? 'var(--col-candidate)' : roleStroke}
+                     strokeWidth={roleSelected ? 2 : baseRoleOfIL ? 2 : roleIsCandidate(ri) ? 2 : roleStrokeW}
                     strokeDasharray={fact._implicit ? '4 3' : undefined}
                     onMouseDown={(e)   => handleRoleMouseDown(ri, e)}
                     onDoubleClick={(e) => handleRoleDoubleClick(ri, e)}
                     onContextMenu={(e) => handleRoleContextMenu(ri, e)}
                     onMouseMove={isSimpleSelect ? handleRoleMouseMove : undefined}
                     onMouseLeave={isSimpleSelect ? handleRoleMouseLeave : undefined}
-                    style={{ cursor: fact._implicit ? 'pointer' : ((isSubtypeTool || isTargetTool) && fact.objectified) ? 'cell' : isAssignTool || inConstruction || (!!store.sequenceConstruction && !isVcConstruction) || roleSelected ? 'crosshair' : (isRoleValueTool && !vrEligibleRoles.has(ri)) ? 'not-allowed' : (isVcConstruction && !vcEligibleRoles.has(ri)) ? 'not-allowed' : isVcConstruction ? 'crosshair' : 'pointer' }}
+                     style={{ cursor: getRoleCursor(ri, roleSelected) }}
                   />
                 <rect className="hover-ring" x={leftX_v - 3} y={ry - 3} width={ROLE_H + 6} height={ROLE_W + 6}/>
                 {isAssignTool && !role.objectTypeId && (
@@ -2051,7 +2132,8 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
           {fact.uniqueness.map((uRoles, ui) => {
             const isEditing = inConstruction && store.uniquenessConstruction?.uIndex === ui
             const displayRoles = isEditing ? ucRoles : uRoles
-            const isUSelected = (store.selectedUniqueness?.factId === fact.id && store.selectedUniqueness?.uIndex === ui) || isEditing
+            const isUSelected = ((store.selectedUniqueness?.factId === fact.id && store.selectedUniqueness?.uIndex === ui) ||
+              (fact._implicit && store.selectedUniqueness?.factId === fact._parentFactId && store.selectedUniqueness?.roleIndex === fact._implicitRoleIndex && store.selectedUniqueness?.uIndex === ui)) || isEditing
             const barStroke = isUSelected ? 'var(--accent)' : 'var(--col-mandatory)'
             const isEditingUnary = isEditing && uRoles.length === 1
             const displayLevel = isEditingUnary ? multiCount + 1 : levels[ui]
@@ -2059,7 +2141,7 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
             if (isEditing && displayRoles.length === 0) {
               const barX = barX_v(displayLevel)
               return (
-                <g key={ui} className="selectable-group" style={{ cursor: 'pointer', filter: isUSelected ? 'drop-shadow(0 0 3px var(--accent))' : undefined }}
+                <g key={ui} className="selectable-group" style={{ cursor: isElementSelecting(store.tool, store.sequenceConstruction) ? 'not-allowed' : 'pointer', filter: isUSelected ? 'drop-shadow(0 0 3px var(--accent))' : undefined }}
                   onMouseDown={e => e.stopPropagation()} onClick={barClickHandler(ui)}
                   onDoubleClick={barDoubleClickHandler(ui)}>
                   <line x1={barX} y1={startY_v + INSET} x2={barX} y2={startY_v + totalH_v - INSET}
@@ -2074,12 +2156,11 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
             const minRI = Math.min(...displayRoles), maxRI = Math.max(...displayRoles)
             const hitY1 = startY_v + minRI * (ROLE_W + ROLE_GAP)
             const hitY2 = startY_v + maxRI * (ROLE_W + ROLE_GAP) + ROLE_W
-            const isPreferred = prefKey !== null &&
-              JSON.stringify([...uRoles].sort((a, b) => a - b)) === prefKey
+            const isPreferred = preferredKeys.has(JSON.stringify([...uRoles].sort((a, b) => a - b)))
             const barX = adjustedBarX(displayLevel, isPreferred)
             const sw = isUSelected ? BAR_H + 1 : BAR_H
             return (
-              <g key={ui} className="selectable-group" style={{ cursor: 'pointer', filter: isUSelected ? 'drop-shadow(0 0 3px var(--accent))' : undefined }}
+              <g key={ui} className="selectable-group" style={{ cursor: isElementSelecting(store.tool, store.sequenceConstruction) ? 'not-allowed' : 'pointer', filter: isUSelected ? 'drop-shadow(0 0 3px var(--accent))' : undefined }}
                 onMouseDown={e => e.stopPropagation()} onClick={barClickHandler(ui)}
                 onDoubleClick={barDoubleClickHandler(ui)}
                 onContextMenu={e => { e.preventDefault(); e.stopPropagation(); onBarContextMenu?.(ui, e) }}>
@@ -2119,7 +2200,7 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
             const barX = adjustedBarX(previewLevel, false)
             if (ucRoles.length === 0) {
               return (
-                <g style={{ cursor: 'pointer' }} onMouseDown={e => e.stopPropagation()}
+                <g style={{ cursor: isElementSelecting(store.tool, store.sequenceConstruction) ? 'not-allowed' : 'pointer' }} onMouseDown={e => e.stopPropagation()}
                   onClick={() => store.commitUniquenessConstruction()}>
                   <line x1={barX} y1={startY_v + INSET} x2={barX} y2={startY_v + totalH_v - INSET}
                     stroke="var(--accent)" strokeWidth={BAR_H + 1} strokeLinecap="butt"
@@ -2129,7 +2210,7 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
             }
             const { runs } = buildRunsV(ucRoles, previewLevel, 'preview')
             return (
-              <g style={{ cursor: 'pointer' }} onMouseDown={e => e.stopPropagation()}
+              <g style={{ cursor: isElementSelecting(store.tool, store.sequenceConstruction) ? 'not-allowed' : 'pointer' }} onMouseDown={e => e.stopPropagation()}
                 onClick={() => store.commitUniquenessConstruction()}>
                 {runs.map(({ y1, y2, solid, key }) => (
                   <line key={key} x1={barX} y1={y1} x2={barX} y2={y2}
@@ -2160,30 +2241,32 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
             {displayRoleOrder(fact).map((ri, pi) => {
              const role = fact.roles[ri]
              const rx = startX + pi * (ROLE_W + ROLE_GAP)
-             const roleSelected = isRoleSelected(ri) || isImplicitLinkRoleSelected(ri)
-             const isSimpleSelect = store.tool === 'select' && !store.sequenceConstruction && !inConstruction && !inFrequencyConstruction && !isAssignTool
-             return (
-                 <g key={role.id} className="role-box-group" filter={roleSelected ? 'url(#selectGlow)' : undefined}>
-                  <rect
-                    x={rx} y={topY} width={ROLE_W} height={ROLE_H}
-                    fill={
-                      roleFirstDraft && store.linkDraft.roleIndex === ri ? '#e8e0f8'
-                      : inConstruction && ucRoles.includes(ri) ? '#dde8f5'
-                      : inFrequencyConstruction && fcRoles.includes(ri) ? '#dde8f5'
-                      : roleIsCandidate(ri) ? 'var(--fill-candidate)'
-                      : roleSelected ? '#ffffff'
-                      : highlightedRoles?.has(ri) ? '#fde3c8'
-                      : '#ffffff'
-                    }
-                    stroke={roleSelected ? 'var(--accent)' : roleIsCandidate(ri) ? 'var(--col-candidate)' : roleStroke}
-                    strokeWidth={roleSelected ? 2 : roleIsCandidate(ri) ? 2 : roleStrokeW}
+              const roleSelected = isRoleSelected(ri) || isImplicitLinkRoleSelected(ri)
+              const baseRoleOfIL = isBaseRoleOfSelectedImplicitLink(ri)
+              const isSimpleSelect = store.tool === 'select' && !store.sequenceConstruction && !inConstruction && !inFrequencyConstruction && !isAssignTool
+              return (
+                  <g key={role.id} className="role-box-group" filter={roleSelected ? 'url(#selectGlow)' : undefined}>
+                   <rect
+                     x={rx} y={topY} width={ROLE_W} height={ROLE_H}
+                     fill={
+                       roleFirstDraft && store.linkDraft.roleIndex === ri ? '#e8e0f8'
+                       : inConstruction && ucRoles.includes(ri) ? '#dde8f5'
+                       : inFrequencyConstruction && fcRoles.includes(ri) ? '#dde8f5'
+                       : roleIsCandidate(ri) ? 'var(--fill-candidate)'
+                       : baseRoleOfIL ? '#dde8f5'
+                       : roleSelected ? '#ffffff'
+                       : highlightedRoles?.has(ri) ? '#fde3c8'
+                       : '#ffffff'
+                     }
+                     stroke={roleSelected ? 'var(--accent)' : baseRoleOfIL ? '#7a9bb5' : roleIsCandidate(ri) ? 'var(--col-candidate)' : roleStroke}
+                     strokeWidth={roleSelected ? 2 : baseRoleOfIL ? 2 : roleIsCandidate(ri) ? 2 : roleStrokeW}
                     strokeDasharray={fact._implicit ? '4 3' : undefined}
                     onMouseDown={(e)   => handleRoleMouseDown(ri, e)}
                     onDoubleClick={(e) => handleRoleDoubleClick(ri, e)}
                     onContextMenu={(e) => handleRoleContextMenu(ri, e)}
                     onMouseMove={isSimpleSelect ? handleRoleMouseMove : undefined}
                     onMouseLeave={isSimpleSelect ? handleRoleMouseLeave : undefined}
-                    style={{ cursor: fact._implicit ? 'pointer' : ((isSubtypeTool || isTargetTool) && fact.objectified) ? 'cell' : isAssignTool || inConstruction || (!!store.sequenceConstruction && !isVcConstruction) || roleSelected ? 'crosshair' : (isRoleValueTool && !vrEligibleRoles.has(ri)) ? 'not-allowed' : (isVcConstruction && !vcEligibleRoles.has(ri)) ? 'not-allowed' : isVcConstruction ? 'crosshair' : 'pointer' }}
+                     style={{ cursor: getRoleCursor(ri, roleSelected) }}
                   />
                 <rect className="hover-ring" x={rx - 3} y={topY - 3} width={ROLE_W + 6} height={ROLE_H + 6}/>
                 {isAssignTool && !role.objectTypeId && (
@@ -2202,7 +2285,8 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
           {fact.uniqueness.map((uRoles, ui) => {
             const isEditing = inConstruction && store.uniquenessConstruction?.uIndex === ui
             const displayRoles = isEditing ? ucRoles : uRoles
-            const isUSelected = (store.selectedUniqueness?.factId === fact.id && store.selectedUniqueness?.uIndex === ui) || isEditing
+            const isUSelected = ((store.selectedUniqueness?.factId === fact.id && store.selectedUniqueness?.uIndex === ui) ||
+              (fact._implicit && store.selectedUniqueness?.factId === fact._parentFactId && store.selectedUniqueness?.roleIndex === fact._implicitRoleIndex && store.selectedUniqueness?.uIndex === ui)) || isEditing
             const barStroke = isUSelected ? 'var(--accent)' : 'var(--col-mandatory)'
             const isEditingUnary = isEditing && uRoles.length === 1
             const displayLevel = isEditingUnary ? multiCount + 1 : levels[ui]
@@ -2225,12 +2309,11 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
             const minRI = Math.min(...displayRoles), maxRI = Math.max(...displayRoles)
             const hitX1 = startX + minRI * (ROLE_W + ROLE_GAP)
             const hitX2 = startX + maxRI * (ROLE_W + ROLE_GAP) + ROLE_W
-            const isPreferred = prefKey !== null &&
-              JSON.stringify([...uRoles].sort((a, b) => a - b)) === prefKey
+            const isPreferred = preferredKeys.has(JSON.stringify([...uRoles].sort((a, b) => a - b)))
             const barY = adjustedBarY(displayLevel, isPreferred)
             const sw = isUSelected ? BAR_H + 1 : BAR_H
             return (
-              <g key={ui} className="selectable-group" style={{ cursor: 'pointer', filter: isUSelected ? 'drop-shadow(0 0 3px var(--accent))' : undefined }}
+              <g key={ui} className="selectable-group" style={{ cursor: isElementSelecting(store.tool, store.sequenceConstruction) ? 'not-allowed' : 'pointer', filter: isUSelected ? 'drop-shadow(0 0 3px var(--accent))' : undefined }}
                 onMouseDown={e => e.stopPropagation()} onClick={barClickHandler(ui)}
                 onDoubleClick={barDoubleClickHandler(ui)}
                 onContextMenu={e => { e.preventDefault(); e.stopPropagation(); onBarContextMenu?.(ui, e) }}>
@@ -2270,7 +2353,7 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
             const barY = adjustedBarY(previewLevel, false)
             if (ucRoles.length === 0) {
               return (
-                <g style={{ cursor: 'pointer' }} onMouseDown={e => e.stopPropagation()}
+                <g style={{ cursor: isElementSelecting(store.tool, store.sequenceConstruction) ? 'not-allowed' : 'pointer' }} onMouseDown={e => e.stopPropagation()}
                   onClick={() => store.commitUniquenessConstruction()}>
                   <line x1={startX + INSET} y1={barY} x2={startX + totalW - INSET} y2={barY}
                     stroke="var(--accent)" strokeWidth={BAR_H + 1} strokeLinecap="butt"
@@ -2280,7 +2363,7 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
             }
             const { runs } = buildRuns(ucRoles, previewLevel, 'preview')
             return (
-              <g style={{ cursor: 'pointer' }} onMouseDown={e => e.stopPropagation()}
+              <g style={{ cursor: isElementSelecting(store.tool, store.sequenceConstruction) ? 'not-allowed' : 'pointer' }} onMouseDown={e => e.stopPropagation()}
                 onClick={() => store.commitUniquenessConstruction()}>
                 {runs.map(({ x1, x2, solid, key }) => (
                   <line key={key} x1={x1} y1={barY} x2={x2} y2={barY}
@@ -2301,7 +2384,7 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
     {/* ── Value range annotations ─────────────────────────────────────────────
         Rendered as siblings (outside the fact type's glow group) so they
         keep their own visual identity regardless of fact-type selection.    */}
-    {fact.roles.map((role, ri) => {
+    {!fact._implicit && fact.roles.map((role, ri) => {
       const vr = formatValueRange(role.valueRange)
       if (!vr) return null
 
@@ -2360,7 +2443,7 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
     {/* ── Cardinality range annotations ───────────────────────────────────────
         Rendered as siblings (outside the fact type's glow group) so they
         keep their own visual identity regardless of fact-type selection.    */}
-    {fact.roles.map((role, ri) => {
+    {!fact._implicit && fact.roles.map((role, ri) => {
       const cr = formatCardinalityRange(role.cardinalityRange)
       if (!cr) return null
 
@@ -2435,7 +2518,7 @@ export default function FactTypeNode({ fact, onDragStart, onContextMenu, onRoleC
         onMouseDown: e => {
           e.stopPropagation()
           ifWasDragged.current = false
-          ifDragRef.current = { ifId: ifItem.id, startX: e.clientX, startY: e.clientY, origX: cx, origY: cy }
+          ifDragRef.current = { ifId: ifItem.id, startX: e.clientX, startY: e.clientY, origX: cx, origY: cy, origIfId: ifItem._origIfId ?? ifItem.id }
           setIfLive({ ifId: ifItem.id, x: cx, y: cy })
         },
         onClick: e => {

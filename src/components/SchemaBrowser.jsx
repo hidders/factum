@@ -159,14 +159,22 @@ export default function SchemaBrowser() {
   const [resizing,    setResizing]    = useState(false)
   const [pos,  setPos]  = useState(null)
   const [size, setSize] = useState({ w: INIT_W, h: INIT_H })
+  const [winW, setWinW] = useState(window.innerWidth)
+  const [winH, setWinH] = useState(window.innerHeight)
   const animTimerRef = useRef(null)
   const dragRef      = useRef(null)
   const resizeRef    = useRef(null)
   const panelRef     = useRef(null)
 
+  useEffect(() => {
+    const onResize = () => { setWinW(window.innerWidth); setWinH(window.innerHeight) }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
   const toolbarBottom = document.getElementById('app-toolbar')?.getBoundingClientRect().bottom ?? 36
   const tabsBottom    = document.getElementById('diagram-tabs')?.getBoundingClientRect().bottom ?? (toolbarBottom + 35)
-  const posX = pos?.x ?? Math.max(8, window.innerWidth - 248 - INIT_W - 8)
+  const posX = pos?.x ?? Math.max(8, winW - 248 - INIT_W - 8)
   const posY = pos?.y ?? (tabsBottom + 8)
 
   // ── drag to move ─────────────────────────────────────────────────────────
@@ -323,12 +331,14 @@ export default function SchemaBrowser() {
   })
 
   const PILL_W = 128
+  const MINIMAP_PILL_W = 114
   const panelW = collapsed ? PILL_W    : size.w
   const panelH = collapsed ? HDR_H     : size.h
   const panelR = collapsed ? HDR_H / 2 : 6
 
-  const pillLeft = window.innerWidth  - 258 - 114 - 6 - PILL_W
-  const pillTop  = window.innerHeight - 26 - 8 - HDR_H
+  const inspectorWidth = store.inspectorWidth
+  const pillLeft = winW - inspectorWidth - MINIMAP_PILL_W - 12 - PILL_W
+  const pillTop  = winH - 26 - 8 - HDR_H
   const displayLeft = expandFrom?.x ?? (collapsed ? pillLeft : posX)
   const displayTop  = expandFrom?.y ?? (collapsed ? pillTop  : posY)
 

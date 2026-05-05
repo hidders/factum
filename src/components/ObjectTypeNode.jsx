@@ -1,5 +1,6 @@
 import React, { useCallback, useState, useRef, useEffect } from 'react'
 import { useOrmStore } from '../store/ormStore'
+import { isSelectionMode, isElementSelecting } from '../utils/cursorUtils'
 
 const OT_FONT       = "'Segoe UI', Helvetica, Arial, sans-serif"
 const OT_SIZE_NAME  = 18
@@ -225,7 +226,7 @@ export default function ObjectTypeNode({ objectType: ot, onDragStart, mousePos, 
     }
 
     if (store.tool === 'connectConstraint') { store.clearSelection(); store.setTool('select'); return }
-    if (store.tool === 'toggleMandatory' || store.tool === 'addInternalUniqueness') { store.setTool('select'); return }
+    if (store.tool === 'toggleMandatory' || store.tool === 'addInternalUniqueness' || store.tool === 'addInternalFrequency') { store.setTool('select'); return }
     if (store.tool === 'addConstraint:valueRange') {
       const eligible = ot.kind === 'value' || (ot.kind === 'entity' && ot.refMode && ot.refMode !== 'none')
       if (eligible) { onValueRangeClick?.(e.clientX, e.clientY) }
@@ -299,7 +300,22 @@ export default function ObjectTypeNode({ objectType: ot, onDragStart, mousePos, 
       onMouseDown={handleMouseDown}
       onDoubleClick={handleDoubleClick}
       onContextMenu={onContextMenu}
-      style={{ cursor: isSubtypeTool || isAssignTool || isTargetCandidate ? 'cell' : isVrCandidate ? 'pointer' : isVrTool ? 'not-allowed' : isCrTool ? 'pointer' : editing ? 'text' : 'grab' }}
+      style={{ cursor: (() => {
+        if (editing || editingRef) return 'text'
+        if (isElementSelecting(store.tool, store.sequenceConstruction)) {
+          if (store.tool === 'addSubtype') return 'pointer'
+          if (store.tool === 'assignRole') return store.linkDraft?.factId != null ? 'pointer' : 'not-allowed'
+          if (store.tool === 'addTargetConnector') return store.linkDraft?.constraintId ? 'pointer' : 'not-allowed'
+          if (store.tool === 'addConstraint:valueRange') return isVrCandidate ? 'pointer' : 'not-allowed'
+          if (isCrTool) return 'pointer'
+          return 'not-allowed'
+        }
+        if (isSubtypeTool || isAssignTool || isTargetCandidate) return 'cell'
+        if (isVrCandidate) return 'pointer'
+        if (isVrTool) return 'not-allowed'
+        if (isCrTool) return 'pointer'
+        return 'grab'
+      })() }}
       filter={isSelected || isDraftFrom || hasDraft ? 'url(#selectGlow)' : isShared ? 'url(#sharedGlow)' : undefined}
     >
       <rect x={ot.x - w/2} y={ot.y - h/2} width={w} height={h} rx={6}
